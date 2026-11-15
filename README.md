@@ -4,7 +4,7 @@
 
 Edomea Marketplace è una piattaforma commerciale open source, multicanale e multipiattaforma, distribuita come **software white label**: ogni azienda può adottarla e presentarla con il proprio nome, logo, colori e domini, usando lo stesso Core e gli stessi moduli.
 
-Il progetto è in fase di progettazione (baseline 0.4.1). Non esistono ancora pacchetti installabili.
+Il progetto è in fase iniziale di sviluppo: EMP Desk 0.5.0-alpha.1 e Core 0.1.0 sono versioni di laboratorio, non pronte per la produzione.
 
 ## Componenti
 
@@ -17,6 +17,8 @@ Il progetto è in fase di progettazione (baseline 0.4.1). Non esistono ancora pa
 ## Documentazione
 
 - [Manuale tecnico-operativo](docs/manuale-tecnico-operativo.md): architettura, installazione, sicurezza, funzioni, sincronizzazione, disaster recovery e piano di sviluppo.
+- [Architettura modulare e installazione](docs/architettura-moduli.md): manifest dei moduli, ordine Core → plugin, pacchetti verificati.
+- [Fusione Edomea + VenVia](docs/fusione-edomea-venvia.md): cosa EMP prende da ciascuno e mappa dei plugin Edomea.
 
 ## Partecipare
 

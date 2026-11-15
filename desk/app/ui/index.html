@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EMP Desk</title>
+<link rel="stylesheet" href="style.css">
+<script defer src="app.js"></script>
+</head>
+<body>
+<header><strong>EMP Desk</strong><span>Edomea Marketplace · 0.5 Alpha 1</span></header>
+<main>
+  <h1>Configurazione della postazione</h1>
+  <p class="motto">Vendi e compra dove vuoi e come vuoi.</p>
+
+  <section>
+    <h2>1. Modalità operativa</h2>
+    <div class="choices">
+      <label><input type="radio" name="mode" value="server"> Server del negozio
+        <small>Ospita il database e il Core con i plugin. Uno solo per negozio.</small></label>
+      <label><input type="radio" name="mode" value="client"> Postazione Client
+        <small>Lavora sul Server del negozio tramite le sue API. Non installa database.</small></label>
+    </div>
+    <div id="client-box" hidden>
+      <label for="server-url">Indirizzo del Server</label>
+      <input id="server-url" type="url" placeholder="https://emp.negozio.lan" autocomplete="off" spellcheck="false">
+    </div>
+    <button id="save">Salva configurazione</button>
+    <p id="status" role="status"></p>
+  </section>
+
+  <section id="modules-box" hidden>
+    <h2>2. Core e plugin</h2>
+    <p>Il Core si installa sempre per primo; i plugin seguono nell'ordine delle loro dipendenze. Ogni pacchetto è verificato con la sua impronta SHA-256 prima dell'installazione.</p>
+    <button id="plan">Calcola piano di installazione</button>
+    <table id="plan-table" hidden>
+      <thead><tr><th>#</th><th>Modulo</th><th>Versione</th><th>Installata</th><th>Operazione</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div id="confirm-box" hidden>
+      <p>Confermi l'installazione dei file nell'ordine indicato? I dati esistenti non vengono cancellati; le versioni sostituite restano conservate.</p>
+      <button id="install">Conferma e installa</button>
+      <button id="cancel" class="secondary">Annulla</button>
+    </div>
+    <p id="modules-status" role="status"></p>
+  </section>
+
+  <section>
+    <h2>Diagnostica del computer</h2>
+    <button id="scan">Aggiorna diagnostica</button>
+    <pre id="report" aria-live="polite">In attesa...</pre>
+  </section>
+  <footer>Ambiente PHP, MariaDB e Nginx: installazione automatica prevista nella Macro 2. Core e plugin sono in PHP.</footer>
+</main>
+</body>
+</html>

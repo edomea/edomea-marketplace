@@ -1,0 +1,82 @@
+name: EMP CI (Linux)
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core-php:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - name: PHP disponibile
+        run: php -v && php -m | grep -iE 'pdo_sqlite|zip|mbstring'
+      - name: Sintassi PHP
+        run: |
+          set -e
+          find src public bin ../plugins ../tools -type f \( -name '*.php' -o -name emp \) -print0 | xargs -0 -n1 php -l
+      - name: Dipendenze di sviluppo
+        run: composer install --no-interaction --no-progress
+      - name: Test Core
+        run: vendor/bin/phpunit
+
+  desk-rust:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: desk
+    steps:
+      - uses: actions/checkout@v4
+      - name: Librerie di sistema per Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
+      - name: Rust
+        run: rustup default stable && rustup component add clippy
+      - name: Icona provvisoria
+        run: |
+          mkdir -p app/src-tauri/icons
+          python3 - <<'PY'
+          import struct, zlib
+          w = h = 32
+          raw = b''.join(b'\x00' + bytes([30, 58, 95, 255]) * w for _ in range(h))
+          def chunk(t, d): return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+          png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
+          ico = struct.pack('<HHH', 0, 1, 1) + struct.pack('<BBBBHHII', w, h, 0, 0, 1, 32, len(png), 22) + png
+          open('app/src-tauri/icons/icon.ico', 'wb').write(ico)
+          PY
+      - name: Clippy (warning bloccanti)
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      - name: Test
+        run: cargo test --locked --workspace
+
+  end-to-end:
+    needs: [core-php, desk-rust]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust
+        run: rustup default stable
+      - name: Pacchetti → installazione Desk → migrazioni Core → API
+        run: |
+          set -euo pipefail
+          W="$RUNNER_TEMP/e2e"
+          php tools/build-packages.php --con-esempi "$W/pacchetti"
+          cargo run --locked -q --manifest-path desk/Cargo.toml -p emp-modules --example emp-install -- "$W/pacchetti" "$W/modules"
+          printf "<?php return ['dsn' => 'sqlite:%s/emp.db', 'modules_dir' => '%s/modules'];\n" "$W" "$W" > "$W/config.php"
+          export EMP_CONFIG="$W/config.php"
+          php "$W/modules/emp-core/bin/emp" installa --utente=ci
+          php -S 127.0.0.1:8765 -t "$W/modules/emp-core/public" "$W/modules/emp-core/public/index.php" > "$W/server.log" 2>&1 &
+          sleep 2
+          curl -fsS http://127.0.0.1:8765/api/v1/salute | tee /dev/stderr | grep -q '"stato":"ok"'
+          curl -fsS http://127.0.0.1:8765/api/v1/esempio | grep -q '"modulo":"emp-esempio"'
+          # Seconda installazione: nulla da fare.
+          cargo run --locked -q --manifest-path desk/Cargo.toml -p emp-modules --example emp-install -- "$W/pacchetti" "$W/modules" | grep -c invariato | grep -q 2

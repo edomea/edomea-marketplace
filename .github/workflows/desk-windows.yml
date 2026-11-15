@@ -1,0 +1,141 @@
+name: EMP Desk Windows — validazione di sicurezza
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desk/**'
+      - 'core/**'
+      - 'plugins/**'
+      - 'tools/**'
+      - '.github/workflows/desk-windows.yml'
+  pull_request:
+    paths:
+      - 'desk/**'
+      - 'core/**'
+      - 'plugins/**'
+      - 'tools/**'
+      - '.github/workflows/desk-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: desk/app/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: zip
+          tools: none
+      - name: Prepare Rust
+        shell: pwsh
+        run: rustup default stable
+      - name: Generate application icon
+        shell: powershell
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          New-Item -ItemType Directory -Force icons | Out-Null
+          $stream = [IO.File]::Create((Join-Path (Get-Location) 'icons/icon.ico'))
+          try { [System.Drawing.SystemIcons]::Application.Save($stream) } finally { $stream.Dispose() }
+      - name: Verify committed lockfile
+        shell: pwsh
+        run: |
+          # Cargo.lock è versionato: la build usa esattamente le dipendenze revisionate.
+          cargo metadata --locked --format-version 1 > $null
+          if ($LASTEXITCODE -ne 0) { throw 'Cargo.lock missing or out of date' }
+      - name: Build module packages (Core + plugins)
+        shell: pwsh
+        run: |
+          php -v
+          if ($LASTEXITCODE -ne 0) { throw 'PHP not available on runner' }
+          php ../../../tools/build-packages.php pacchetti
+          if ($LASTEXITCODE -ne 0) { throw 'Package build failed' }
+      - name: Audit Rust dependencies
+        shell: pwsh
+        run: |
+          cargo install cargo-audit --locked
+          if ($LASTEXITCODE -ne 0) { throw 'Audit tool installation failed' }
+          # Keep an unfiltered audit in the logs; only the two documented
+          # Linux-stack warnings may be excepted after a Windows graph check.
+          cargo audit
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency vulnerability or audit failure' }
+          $graph = cargo tree --locked --workspace --target x86_64-pc-windows-msvc --prefix none --edges normal,build,dev
+          if ($LASTEXITCODE -ne 0) { throw 'Windows dependency graph unavailable' }
+          $graph | Set-Content windows-dependencies.txt
+          if ($graph -match '^(glib|proc-macro-error) v') { throw 'Reviewed Linux dependencies present in Windows graph; security review required' }
+          Write-Host 'Windows-only exceptions: RUSTSEC-2024-0370 and RUSTSEC-2024-0429; both crates absent from Windows dependency graph. Linux remains blocked pending remediation.'
+          cargo audit --deny warnings --ignore RUSTSEC-2024-0370 --ignore RUSTSEC-2024-0429
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency audit failed' }
+      - name: Check Rust code
+        shell: pwsh
+        run: |
+          rustup component add clippy
+          if ($LASTEXITCODE -ne 0) { throw 'Clippy setup failed' }
+          cargo clippy --locked --workspace --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
+      - name: Test Rust
+        shell: pwsh
+        run: cargo test --locked --workspace
+      - name: Install Tauri CLI
+        shell: pwsh
+        run: cargo install tauri-cli --version "^2" --locked
+      - name: Build Windows installer
+        shell: pwsh
+        run: cargo tauri build --bundles nsis
+      - name: Scan binaries with Microsoft Defender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $status = Get-MpComputerStatus
+          $status | Select-Object AMServiceEnabled,AntivirusEnabled,RealTimeProtectionEnabled,AMRunningMode,AntivirusSignatureAge | Format-List
+          if (!$status.AMServiceEnabled -or !$status.AntivirusEnabled) {
+            Write-Host 'Attempting to start the existing Defender service on the disposable CI runner.'
+            Start-Service -Name WinDefend -ErrorAction Stop
+            $status = Get-MpComputerStatus
+          }
+          if (!$status.AMServiceEnabled -or !$status.AntivirusEnabled) { throw 'Defender engine unavailable; an approved dedicated scanning runner is required. No artifact will be published.' }
+          if (!$status.RealTimeProtectionEnabled) { Write-Host 'Real-time protection inactive: explicit on-demand scanning is mandatory.' }
+          Update-MpSignature
+          $status = Get-MpComputerStatus
+          if (!$status.AntivirusEnabled -or !$status.AMServiceEnabled -or $null -eq $status.AntivirusSignatureAge -or $status.AntivirusSignatureAge -gt 1) { throw 'Defender signatures are not current' }
+          $platform = Join-Path $env:ProgramData 'Microsoft\Windows Defender\Platform'
+          $scanner = Get-ChildItem $platform -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending | ForEach-Object { Join-Path $_.FullName 'MpCmdRun.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (!$scanner) { $scanner = Join-Path $env:ProgramFiles 'Windows Defender\MpCmdRun.exe' }
+          if (!(Test-Path $scanner)) { throw 'Defender scanner unavailable' }
+          $start = Get-Date
+          $files = @(Get-Item ../../target/release/emp-desk.exe) + @(Get-ChildItem ../../target/release/bundle/nsis/*.exe)
+          foreach ($file in $files) {
+            $before = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash
+            $scanOutput = & $scanner -Scan -ScanType 3 -File $file.FullName -DisableRemediation 2>&1
+            $scanExit = $LASTEXITCODE
+            $scanOutput | Write-Host
+            if ($scanExit -ne 0 -or !(Test-Path -LiteralPath $file.FullName)) { throw 'Antivirus scan failed or detected a threat' }
+            if (($scanOutput -join "`n") -match '(?im)^\s*(Threat\s+Name|Threat\s+ID|Threat\s+detected)\s*:') { throw 'Defender reported a threat in scan output' }
+            if ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne $before) { throw 'Scanned file changed' }
+          }
+          $detections = @(Get-MpThreatDetection | Where-Object { $_.InitialDetectionTime -ge $start })
+          if ($detections.Count -gt 0) { throw 'Defender reported a detection during validation' }
+      - name: Collect release
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $setup = @(Get-ChildItem ../../target/release/bundle/nsis/*.exe)
+          if ($setup.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
+          Copy-Item $setup[0].FullName dist/
+          Copy-Item ../README.md dist/INSTALLATION.md
+          Copy-Item ../../Cargo.lock dist/Cargo.lock
+          Copy-Item pacchetti/emp-packages.json dist/emp-packages.json
+          Copy-Item windows-dependencies.txt dist/windows-dependencies.txt
+          cargo tree --locked | Set-Content dist/dependencies.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed' }
+          Get-ChildItem dist/*.exe | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } | Set-Content dist/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: EMP-Desk-security-validation-UNSIGNED
+          path: desk/app/src-tauri/dist/
+          if-no-files-found: error

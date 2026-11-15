@@ -1,0 +1,16 @@
+[package]
+name = "emp-modules"
+version = "0.1.0"
+description = "EMP Desk: verifica pacchetti, ordine di installazione Core → plugin, estrazione sicura"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+zip = { version = "9", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"

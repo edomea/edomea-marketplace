@@ -1,0 +1,17 @@
+[package]
+name = "emp-desk"
+version = "0.5.0-alpha.1"
+description = "EMP Desk — Edomea Marketplace: installazione Server/Client, Core e plugin"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+emp-modules = { path = "../../crates/emp-modules" }
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sysinfo = "0.33"

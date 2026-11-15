@@ -1,0 +1,3 @@
+Cartella dei pacchetti inclusi nell'installer di EMP Desk.
+La CI vi copia emp-packages.json e gli ZIP del Core e dei plugin
+(script: tools/build-packages.php). In sviluppo può restare vuota.

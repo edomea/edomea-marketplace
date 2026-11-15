@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "id": "emp-core",
+  "name": "EMP Core",
+  "version": "0.1.0",
+  "type": "core",
+  "description": "Motore di Edomea Marketplace: API, moduli, autorizzazioni, tracciabilità.",
+  "php": ">=8.2.0",
+  "class": "Emp\\Core\\CoreModule",
+  "autoload": { "Emp\\Core\\": "src/" },
+  "table_prefix": "core_",
+  "migrations": "migrations",
+  "permissions": ["core.moduli.gestisci", "core.audit.leggi"]
+}

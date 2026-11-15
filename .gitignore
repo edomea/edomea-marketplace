@@ -20,3 +20,10 @@ composer.phar
 Thumbs.db
 .idea/
 .vscode/
+
+# EMP Desk: icone e pacchetti generati in build
+/desk/target/
+/desk/app/src-tauri/icons/
+/desk/app/src-tauri/pacchetti/*
+!/desk/app/src-tauri/pacchetti/LEGGIMI.txt
+/desk/app/src-tauri/dist/

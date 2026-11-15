@@ -1,0 +1,22 @@
+# Rust (Edomea Desk)
+/desk/target/
+**/*.rs.bk
+
+# PHP (Edomea Core e plugin)
+/vendor/
+**/vendor/
+composer.phar
+.phpunit.result.cache
+
+# Configurazioni locali e segreti: mai nel repository
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Sistema operativo ed editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

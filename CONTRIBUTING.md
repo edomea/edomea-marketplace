@@ -25,3 +25,4 @@ Grazie per l'interesse. Il progetto è aperto a tutti, con una regola fondamenta
 - Non includere mai credenziali, chiavi, certificati privati o dati reali di clienti e negozi.
 - Rispetta l'architettura descritta nel [manuale tecnico-operativo](docs/manuale-tecnico-operativo.md): Desk in Rust, Core e plugin in PHP, accesso ai dati solo tramite le API del Core.
 - Il marchio Edomea non può essere usato in fork o installazioni white label senza autorizzazione.
+- Inviando una pull request accetti che il tuo contributo sia distribuito con la licenza del progetto, [AGPL-3.0](LICENSE).

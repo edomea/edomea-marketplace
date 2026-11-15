@@ -127,7 +127,7 @@ jobs:
           $setup = @(Get-ChildItem ../../target/release/bundle/nsis/*.exe)
           if ($setup.Count -ne 1) { throw 'Expected exactly one NSIS installer' }
           Copy-Item $setup[0].FullName dist/
-          Copy-Item ../README.md dist/INSTALLATION.md
+          Copy-Item ../../README.md dist/INSTALLATION.md
           Copy-Item ../../Cargo.lock dist/Cargo.lock
           Copy-Item pacchetti/emp-packages.json dist/emp-packages.json
           Copy-Item windows-dependencies.txt dist/windows-dependencies.txt

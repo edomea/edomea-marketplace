@@ -51,6 +51,7 @@ jobs:
           png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
           ico = struct.pack('<HHH', 0, 1, 1) + struct.pack('<BBBBHHII', w, h, 0, 0, 1, 32, len(png), 22) + png
           open('app/src-tauri/icons/icon.ico', 'wb').write(ico)
+          open('app/src-tauri/icons/icon.png', 'wb').write(png)
           PY
       - name: Clippy (warning bloccanti)
         run: cargo clippy --locked --workspace --all-targets -- -D warnings

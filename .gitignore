@@ -27,3 +27,4 @@ Thumbs.db
 /desk/app/src-tauri/pacchetti/*
 !/desk/app/src-tauri/pacchetti/LEGGIMI.txt
 /desk/app/src-tauri/dist/
+/desk/app/src-tauri/gen/

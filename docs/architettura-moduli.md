@@ -1,6 +1,6 @@
 # EMP — Architettura modulare e installazione
 
-Specifica tecnica per **Edomea Marketplace (EMP)**. Versione 0.2 · 16/11/2026.
+Specifica tecnica per **Edomea Marketplace (EMP)**. Versione 0.3 · 16/11/2026 (EMP Server su Ubuntu al posto di EMP Desk).
 
 Questo documento definisce come si installano il Core e i plugin. Integra il [manuale tecnico-operativo](manuale-tecnico-operativo.md) e la [mappa di fusione Edomea/VenVia](fusione-edomea-venvia.md).
 
@@ -8,20 +8,20 @@ Questo documento definisce come si installano il Core e i plugin. Integra il [ma
 
 | Componente | Cartella nel repository | Chi lo installa | Come |
 |---|---|---|---|
-| **EMP Desk** (Server/Client) | `desk/` | L'operatore | Installer Windows (EXE) |
-| **emp-core** (plugin core) | `core/` | **EMP Desk**, in modalità Server | Pacchetto incluso nell'installer |
+| **EMP Server** | `server/` | Il tecnico, sulla console | `sudo ./installa.sh` su Ubuntu Server LTS |
+| **emp-core** (plugin core) | `core/` | **EMP Server** (`installa.sh`) | Pacchetto incluso in `emp-server-<versione>.tar.gz` |
 | **Plugin dell'ecosistema** | `plugins/<id>/` | **Il Core**, dalla pagina web *Plugin* | Pacchetti del catalogo |
 
 ```
-EMP Desk (Server) ──installa──▶ emp-core ──installa dal web──▶ emp-studio, emp-magazzino, emp-pos, …
-EMP Desk (Client) ──usa le API del Server (nessuna installazione di moduli)
+EMP Server (installa.sh) ──installa──▶ emp-core ──installa dal web──▶ emp-studio, emp-magazzino, emp-pos, …
+Postazioni del negozio ──browser in HTTPS──▶ pagine e API del Core (nessuna installazione)
 ```
 
 ---
 
 ## 1. Principi
 
-1. **Prima il Core, poi i plugin.** Desk installa solo il Core; i plugin si installano dopo, dall'interfaccia web del Core. Nessun plugin si installa né si avvia se il Core non è installato e compatibile.
+1. **Prima il Core, poi i plugin.** EMP Server installa solo il Core; i plugin si installano dopo, dall'interfaccia web del Core. Nessun plugin si installa né si avvia se il Core non è installato e compatibile.
 2. **Un solo formato di modulo.** Core e plugin sono entrambi *moduli* descritti dallo stesso manifest `emp-module.json`. Il Core è il modulo `emp-core` di tipo `core`; tutti gli altri sono di tipo `plugin`.
 3. **Ordine deterministico.** L'ordine di installazione e di avvio è calcolato dalle dipendenze dichiarate (ordinamento topologico), con il Core sempre primo. A parità di dipendenze, l'ordine è alfabetico per `id`, quindi è identico su ogni installazione.
 4. **Il Core governa i plugin, non WordPress.** In EMP Web, WordPress ospita il Core ma non installa né attiva i moduli EMP.
@@ -81,7 +81,7 @@ Un vincolo è una lista di condizioni separate da spazi, tutte da soddisfare:
 
 Le versioni con suffisso pre-release sono inferiori alla versione finale (`0.4.0-alpha.4 < 0.4.0`).
 
-Le stesse regole sono implementate in PHP (Core) e in Rust (Desk), con gli stessi casi di test.
+Le regole sono implementate nel Core (`src/Version/`) e usate anche da `installa.sh` per rifiutare un Core più vecchio di quello installato.
 
 ---
 
@@ -114,27 +114,27 @@ Ci sono due indici distinti, generati da `tools/build-packages.php`:
 
 | Indice | Contenuto | Dove si usa |
 |---|---|---|
-| Pacchetto del Core (`build-packages.php core`) | solo `emp-core` | incluso nell'installer EMP Desk |
-| Catalogo plugin (`build-packages.php plugin`) | tutti i plugin sviluppati | cartella `catalog_dir` del Core, allegati della release |
+| Pacchetto del Core (`build-packages.php core`) | solo `emp-core` | `pacchetti/` del pacchetto EMP Server |
+| Catalogo plugin (`build-packages.php plugin`) | tutti i plugin sviluppati | `catalogo/` del pacchetto EMP Server → `catalog_dir` del Core |
 
-Entrambi sono generati dalla CI e pubblicati nella release GitHub approvata. In una fase successiva l'indice sarà firmato; fino ad allora la sua integrità dipende dal canale (release GitHub su HTTPS, attestazione di provenienza, pacchetto incluso nell'installer).
+Entrambi sono generati dalla CI e pubblicati nella release GitHub approvata. In una fase successiva l'indice sarà firmato; fino ad allora la sua integrità dipende dal canale (release GitHub su HTTPS, attestazione di provenienza, `SHA256SUMS` del pacchetto EMP Server controllato da `installa.sh`).
 
 ---
 
-## 4. Installazione del Core da EMP Desk
+## 4. Installazione del Core con EMP Server
 
-### Modalità Server
+Su Ubuntu Server LTS, con `sudo ./installa.sh` dal pacchetto `emp-server-<versione>.tar.gz` ([ambiente](ambiente-server-linux.md)):
 
-1. **Preflight**: sistema operativo, architettura, RAM, spazio, porte 80/443/3306, processi e servizi esistenti. Nessuna sovrascrittura di servizi preesistenti.
-2. **Ambiente** (Macro 2): PHP, MariaDB e Caddy ufficiali verificati, servizio di Windows ad avvio automatico, tutto solo su loopback ([dettagli](ambiente-server-windows.md)).
-3. **Core**: Desk legge l'indice incluso nell'installer, che deve contenere **solo** `emp-core`; verifica lo SHA-256 e mostra all'operatore versione inclusa, versione installata e operazione (installa, aggiorna, invariato). Rifiuta una versione più vecchia o una versione già usata con contenuto diverso.
-4. Estrae il pacchetto in `<dati>/modules/emp-core/`, rifiutando percorsi assoluti, `..` e collegamenti simbolici; scrive i file in una cartella temporanea e li attiva solo a estrazione completata. La versione precedente resta in `modules/.precedenti/`.
-5. Il Core esegue le proprie migrazioni, lanciate automaticamente dall'installazione dell'ambiente.
-6. Lo stato è registrato in `<dati>/modules/installed.json`.
+1. **Controlli**: sistema operativo (Ubuntu 24.04 o 26.04 LTS), architettura, systemd, impronte SHA-256 di **tutti** i file del pacchetto (`SHA256SUMS`).
+2. **Ambiente**: Nginx, PHP-FPM e MariaDB dai repository ufficiali di Ubuntu; MariaDB senza porte di rete; certificato HTTPS da un'autorità locale.
+3. **Core**: l'indice `pacchetti/emp-packages.json` deve indicare `emp-core`. L'installazione:
+   - verifica lo SHA-256 del pacchetto;
+   - lo estrae in una cartella temporanea, rifiutando percorsi assoluti e `..`;
+   - **rifiuta una versione più vecchia** di quella installata.
+4. I file del Core vanno in `/var/lib/emp/moduli/emp-core/`, di proprietà di root e protetti dallo *sticky bit* della cartella dei moduli. La versione precedente resta in `/var/lib/emp/precedenti/`.
+5. Le migrazioni si eseguono con `bin/emp installa`, come utente `emp`. Lo stato dei moduli è nel registro del database (`emp_modules`).
 
-### Modalità Client
-
-Il Client **non installa moduli né database**. Configura soltanto l'indirizzo HTTPS del Server, ne verifica l'identità TLS (Macro 3) e usa le API del Core. Le funzioni visibili dipendono dai plugin installati sul Server e dai permessi dell'operatore.
+Le postazioni del negozio **non installano nulla**: usano le pagine e le API del Core dal browser, in HTTPS.
 
 ---
 
@@ -149,12 +149,12 @@ Pagina: `/amministrazione/plugin.html` del Core. API:
 | `POST /api/v1/plugin/{id}/disinstalla` | Rimuove il plugin dal registro; i dati restano |
 
 Installazione di un plugin:
-1. il Core legge il catalogo (`catalog_dir`), verifica lo SHA-256 di ogni pacchetto e ignora un'eventuale voce `emp-core` (il Core si aggiorna solo da Desk);
+1. il Core legge il catalogo (`catalog_dir`), verifica lo SHA-256 di ogni pacchetto e ignora un'eventuale voce `emp-core` (il Core si aggiorna solo con `installa.sh`);
 2. calcola il piano: dipendenze prima, Core sempre già presente, nessun conflitto di versione o di prefisso tabelle;
-3. estrae i pacchetti mancanti o più recenti con le stesse regole di sicurezza di Desk;
+3. estrae i pacchetti mancanti o più recenti rifiutando percorsi assoluti, `..` e collegamenti simbolici;
 4. esegue le migrazioni nell'ordine del piano, registrando l'esecutore.
 
-**Accesso.** La gestione dei plugin è riservata all'**Amministratore Tecnico** autenticato ([accesso e sicurezza](accesso-sicurezza.md)) e, finché non c'è HTTPS in LAN, risponde **solo dal computer Server** (indirizzo di loopback, intestazione `Host` locale). Le altre postazioni ricevono `403`. Nella tracciabilità l'esecutore è il nome utente del Tecnico.
+**Accesso.** La gestione dei plugin è riservata all'**Amministratore Tecnico** autenticato ([accesso e sicurezza](accesso-sicurezza.md)) e risponde **solo in HTTPS** (o a richieste fatte sul Server stesso). In HTTP le altre postazioni ricevono `403`. Nella tracciabilità l'esecutore è il nome utente del Tecnico.
 
 ---
 

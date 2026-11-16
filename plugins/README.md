@@ -3,7 +3,7 @@
 Ogni cartella di `plugins/` è **un plugin** di Edomea Marketplace. I plugin:
 
 - sono scritti in **PHP** e girano sopra il Core (`core/`);
-- **si installano dall'interfaccia web del Core** (pagina *Plugin*), non da EMP Desk;
+- **si installano dall'interfaccia web del Core** (pagina *Plugin*), non da `installa.sh`;
 - dichiarano nome, versione e dipendenze nel proprio `emp-module.json` ([specifica](../docs/architettura-moduli.md));
 - vengono pubblicati come pacchetti ZIP verificati (SHA-256) negli allegati delle release.
 
@@ -49,6 +49,6 @@ Regole valide per tutti i plugin: [docs/architettura-moduli.md §6](../docs/arch
 
 ## Come si installa un plugin
 
-1. EMP Desk installa il Core sul computer Server.
-2. Dal Server si apre la pagina **Plugin** del Core (`/amministrazione/plugin.html`).
+1. EMP Server (`sudo ./installa.sh`) installa il Core e copia il catalogo dei plugin del pacchetto.
+2. Il Tecnico apre, in HTTPS da una postazione del negozio, la pagina **Plugin** del Core (`/amministrazione/plugin.html`).
 3. La pagina elenca i plugin del catalogo con stato e dipendenze; *Installa* estrae i pacchetti verificati e prepara il database nell'ordine corretto.

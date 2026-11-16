@@ -206,6 +206,16 @@ install_core() {
     chmod 0755 "$staging/emp-core/bin/emp"
 
     dest=$EMP_MODULES/emp-core
+    if [[ -f $dest/emp-module.json ]]; then
+        # Mai una versione più vecchia di quella installata (regole delle versioni del Core).
+        # shellcheck disable=SC2016  # codice PHP, non variabili della shell
+        php -r '
+            require $argv[1] . "/src/bootstrap.php";
+            $new = Emp\Core\Version\Version::parse(json_decode(file_get_contents($argv[1] . "/emp-module.json"), true)["version"]);
+            $old = Emp\Core\Version\Version::parse(json_decode(file_get_contents($argv[2] . "/emp-module.json"), true)["version"]);
+            if ($new->compare($old) < 0) { fwrite(STDERR, "il pacchetto contiene il Core $new, più vecchio di quello installato ($old)\n"); exit(1); }
+        ' "$staging/emp-core" "$dest" || { rm -rf "$staging"; die "aggiornamento rifiutato"; }
+    fi
     if [[ -d $dest ]]; then
         backups=$EMP_DATA/precedenti
         install -d -m 0700 -o root -g root "$backups"

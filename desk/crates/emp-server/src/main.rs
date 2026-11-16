@@ -33,17 +33,18 @@ fn main() {
         }
         #[cfg(windows)]
         Some("installa") => {
-            let source = match (args.get(1).map(String::as_str), args.get(2)) {
-                (Some("--sorgente"), Some(dir)) => PathBuf::from(dir),
-                _ => return usage(),
-            };
-            let layout = Layout::system();
-            match provision::install(&source, &layout) {
-                Ok(()) => 0,
-                Err(e) => {
-                    provision::Log::open(&layout).line(&format!("ERRORE: {e}"));
-                    1
+            match (args.get(1).map(String::as_str), args.get(2)) {
+                (Some("--sorgente"), Some(dir)) => {
+                    let layout = Layout::system();
+                    match provision::install(&PathBuf::from(dir), &layout) {
+                        Ok(()) => 0,
+                        Err(e) => {
+                            provision::Log::open(&layout).line(&format!("ERRORE: {e}"));
+                            1
+                        }
+                    }
                 }
+                _ => usage(),
             }
         }
         #[cfg(windows)]
@@ -80,7 +81,7 @@ fn status_json() -> String {
         "versione": env!("CARGO_PKG_VERSION"),
         "servizio": state,
         "core_raggiungibile": health,
-        "indirizzo": format!("http://127.0.0.1/amministrazione/"),
+        "indirizzo": "http://127.0.0.1/amministrazione/",
         "programmi": l.program.display().to_string(),
         "dati": l.data.display().to_string(),
         "registro": l.install_log().display().to_string(),

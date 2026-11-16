@@ -8,6 +8,7 @@
 |---|---|---|
 | 0.4 | 15/11/2026 | Baseline di progettazione (titolo di lavoro "VenVia") |
 | 0.4.1 | 15/11/2026 | Il progetto assume il nome **Edomea Marketplace**; precisata la natura white label; regole di partecipazione open source e di approvazione delle modifiche; linguaggio di Edomea Desk: Rust; licenza AGPL-3.0 |
+| 0.4.3 | 16/11/2026 | Web server: **Caddy** al posto di Nginx (Nginx per Windows è dichiarato dai suoi sviluppatori solo per sviluppo e test); database MariaDB 11.4 LTS; GUI di Desk: Tauri 2 |
 | 0.4.2 | 16/11/2026 | Accesso con sola password (funzionamento offline), Recovery Key del Tecnico; TOTP/OTP rimossi |
 
 ---
@@ -54,7 +55,7 @@ Realizzare Edomea Desk configurabile in modalità Server, con installazione graf
 
 **Edomea Core**: motore PHP orientato agli oggetti, API, modello dati, autorizzazioni, transazioni e gestione dei moduli. Il Core non dipende da WordPress.
 
-**Edomea Desk Server**: installa web server, PHP, MariaDB e Core sulla macchina aziendale scelta. Non richiede VM, hardware dedicato, WordPress o WooCommerce. Può essere contemporaneamente postazione operativa e cassa. Un solo server operativo autorizzato per negozio.
+**Edomea Desk Server**: installa web server (**Caddy**), PHP, MariaDB e Core sulla macchina aziendale scelta, come servizio di Windows *EMP Server* ad avvio automatico (vedi [ambiente Server](ambiente-server-windows.md)). Non richiede VM, hardware dedicato, WordPress o WooCommerce. Può essere contemporaneamente postazione operativa e cassa. Un solo server operativo autorizzato per negozio.
 
 **Edomea Desk Client**: applicazione nativa per Windows, macOS e Linux; individua il server in LAN o accetta nome/IP manuale. Accede alle API del Core, non direttamente al database. Le funzioni dipendono dai permessi dell'operatore, non dal ruolo tecnico della macchina.
 
@@ -210,7 +211,7 @@ Portabilità bidirezionale locale/Web da mantenere nei limiti dei servizi e dei 
 
 1. Definire contratto Core/Desk e struttura repository.
 2. Preparare pipeline GitHub per le tre piattaforme.
-3. Realizzare launcher e installer Server (Rust) con prerequisiti, servizi PHP/MariaDB/web server e disinstallazione non distruttiva.
+3. Realizzare launcher e installer Server (Rust) con prerequisiti, servizi PHP/MariaDB/Caddy e disinstallazione non distruttiva.
 4. Implementare setup grafico, identità tecnica e white label, accesso con password e Recovery Key del Tecnico, Control Center minimo.
 5. Aggiungere API di salute e associazione Client.
 6. Generare release di laboratorio, non produzione.
@@ -227,7 +228,7 @@ Portabilità bidirezionale locale/Web da mantenere nei limiti dei servizi e dei 
 
 ### Decisioni e verifiche ancora aperte
 
-Framework GUI di Desk, web server e packaging; versioni OS/CPU; discovery e fiducia crittografica; Master Recovery Key per i backup cifrati; protocollo di sincronizzazione e inventario; compatibilità fiscale; condizioni d'uso del marchio Edomea (la licenza del codice, AGPL-3.0, è decisa); obiettivi prestazionali e di recupero. Nessun test è dichiarato superato. Il manuale si basa sulle decisioni recuperate dalle conversazioni 0.2–0.4, non su un confronto integrale con il file originale della 0.2.
+Firma dell'installer e packaging; versioni OS/CPU; discovery e fiducia crittografica; Master Recovery Key per i backup cifrati; protocollo di sincronizzazione e inventario; compatibilità fiscale; condizioni d'uso del marchio Edomea (la licenza del codice, AGPL-3.0, è decisa); obiettivi prestazionali e di recupero. Nessun test è dichiarato superato. Il manuale si basa sulle decisioni recuperate dalle conversazioni 0.2–0.4, non su un confronto integrale con il file originale della 0.2.
 
 ---
 

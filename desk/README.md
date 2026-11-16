@@ -8,7 +8,7 @@ Desk prepara il computer e **installa solo il Core** (`emp-core`):
 
 | Modalità | Cosa fa |
 |---|---|
-| **Server** | Diagnostica, ambiente PHP/MariaDB/Nginx (Macro 2), installazione e aggiornamento del Core incluso nell'installer |
+| **Server** | Diagnostica; installazione dell'**ambiente Server** (MariaDB, PHP, Caddy come servizio di Windows *EMP Server*) e del Core; modalità laboratorio facoltativa |
 | **Client** | Salva l'indirizzo `https://` del Server e usa le sue API. Non installa database né moduli |
 
 Tutti gli altri plugin si installano **dalla pagina web Plugin del Core**, non da Desk ([architettura](../docs/architettura-moduli.md)).
@@ -17,6 +17,8 @@ Tutti gli altri plugin si installano **dalla pagina web Plugin del Core**, non d
 
 | Cartella | Contenuto |
 |---|---|
+| `crates/emp-server/` | Programma `emp-servizi`: installazione dell'ambiente (MariaDB, PHP, Caddy), servizio *EMP Server* che li supervisiona, verifica dei componenti con manifest SHA-256 ([dettagli](../docs/ambiente-server-windows.md)) |
+| `componenti.json` | Versioni e impronte fissate dei componenti inclusi nell'installer |
 | `crates/emp-core-installer/` | Verifica SHA-256 del pacchetto del Core, estrazione sicura (niente `..`, percorsi assoluti, collegamenti simbolici), versione precedente conservata in `modules/.precedenti/`, stato in `installed.json` |
 | `app/src-tauri/` | Applicazione desktop: diagnostica, modalità Server/Client, controllo e installazione del Core |
 | `app/src-tauri/pacchetti/` | Pacchetto del Core incluso nell'installer (generato dalla CI) |
@@ -31,7 +33,7 @@ Funziona:
 - **avvio del Core in modalità laboratorio**: PHP ufficiale per Windows incluso nell'installer (scaricato dalla CI da windows.php.net e verificato con SHA-256), database SQLite nella cartella dati, Core su `http://127.0.0.1:8180` raggiungibile solo dal computer Server finché Desk è aperto. Il pulsante *Apri amministrazione* porta al primo setup del Tecnico e all'accesso.
 
 Non ancora presente (vedi roadmap del manuale):
-- Nginx, MariaDB e Core come servizi di Windows ad avvio automatico (Macro 2 completa);
+- collaudo della Macro 2 su un PC del negozio;
 - DNS locale, certificati HTTPS e verifica TLS del Client (Macro 3);
 - firma Authenticode dell'installer.
 

@@ -21,7 +21,7 @@ EMP (Edomea Marketplace) nasce dall'unione di due linee di lavoro:
 ## Decisioni di fusione
 
 1. **Il nome è EMP / Edomea Marketplace.** I nomi VenVia restano solo nello storico.
-2. **WordPress non è un prerequisito del server locale.** Il Core gira su PHP + MariaDB + Nginx installati da Desk. WordPress/WooCommerce restano il canale web facoltativo (EMP Web). Questo chiude il "punto da riconciliare" dell'handover VenVia (§2).
+2. **WordPress non è un prerequisito del server locale.** Il Core gira su PHP + MariaDB + Caddy installati da Desk. WordPress/WooCommerce restano il canale web facoltativo (EMP Web). Questo chiude il "punto da riconciliare" dell'handover VenVia (§2).
 3. **EMP Desk installa solo il Core**; tutti gli altri plugin si installano dall'interfaccia web del Core (pagina *Plugin*). Desk resta l'installatore dell'ambiente, il Core governa l'ecosistema dei plugin.
 4. **I plugin Edomea diventano moduli EMP**, uno alla volta, sopra il Core. Finché un modulo EMP non è collaudato, il plugin Edomea corrispondente resta in uso: nessuna sostituzione forzata.
 5. **I servizi trasversali passano nel Core**: autorizzazione, tracciabilità (audit), orologio locale, anagrafica clienti condivisa, generatore EAN, registro migrazioni.

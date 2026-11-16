@@ -1,6 +1,6 @@
 [package]
 name = "emp-server"
-version = "0.5.0-alpha.2"
+version = "0.5.0-alpha.3"
 description = "EMP Server: installazione dell'ambiente Windows (MariaDB, PHP, Caddy) e servizio di supervisione"
 edition.workspace = true
 license.workspace = true

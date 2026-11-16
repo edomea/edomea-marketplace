@@ -24,7 +24,7 @@ Tutti gli altri plugin si installano **dalla pagina web Plugin del Core**, non d
 | `app/src-tauri/pacchetti/` | Pacchetto del Core incluso nell'installer (generato dalla CI) |
 | `app/ui/` | Interfaccia (HTML/CSS/JS locali, nessuna risorsa remota) |
 
-## Stato (0.5.0-alpha.2)
+## Stato (0.5.0-alpha.3)
 
 Funziona:
 - diagnostica del computer (sistema, CPU, RAM, dischi, porte 80/443/3306, processi runtime);

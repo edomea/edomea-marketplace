@@ -1,0 +1,90 @@
+name: EMP Release
+# Si avvia solo quando il titolare crea un tag v<versione> (es. v0.5.0-alpha.1).
+# Produce una BOZZA di pre-release: niente viene pubblicato finché il titolare
+# non la rivede e la pubblica a mano. Il job di pubblicazione richiede inoltre
+# l'approvazione dell'ambiente "release".
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  check:
+    name: Controlli di versione
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versioni, tag e CHANGELOG coerenti
+        run: php tools/check-release.php "$GITHUB_REF_NAME"
+
+  windows:
+    name: Build e gate di sicurezza Windows
+    needs: check
+    uses: ./.github/workflows/desk-windows.yml
+
+  publish:
+    name: Bozza di release
+    needs: [check, windows]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write      # creare la bozza di release
+      id-token: write      # attestazione di provenienza
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: EMP-Desk-security-validation-UNSIGNED
+          path: windows
+      - name: Assemblaggio degli allegati
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"; V="${TAG#v}"
+          php tools/check-release.php "$TAG" --note=notes.md
+
+          # Pacchetti dei moduli: gli stessi inclusi nell'installer Windows.
+          # Ogni ZIP deve corrispondere all'impronta dell'indice.
+          jq -r '.packages[] | "\(.sha256)  \(.file)"' windows/emp-packages.json > pacchetti.sha256
+          (cd windows/pacchetti && sha256sum -c ../../pacchetti.sha256)
+
+          mkdir -p assets kit
+          shopt -s nullglob
+          setup=(windows/*.exe)
+          [ "${#setup[@]}" -eq 1 ] || { echo "::error::Atteso un solo installer"; exit 1; }
+          cp "${setup[0]}" "kit/EMP-Desk-${V}-x64-setup-UNSIGNED.exe"
+          cp windows/INSTALLATION.md kit/LEGGIMI.md
+          (cd kit && sha256sum ./*.exe > SHA256SUMS.txt)
+          (cd kit && zip -X -q "../assets/EMP-Desk-${V}-windows-x64-UNSIGNED.zip" ./*)
+
+          cp windows/pacchetti/*.zip windows/emp-packages.json assets/
+          cp windows/dependencies.txt "assets/EMP-Desk-${V}-dependencies.txt"
+          cp windows/Cargo.lock "assets/EMP-Desk-${V}-Cargo.lock"
+          (cd assets && sha256sum ./* | sed 's# \./# #' > SHA256SUMS.txt)
+          cat assets/SHA256SUMS.txt
+
+          {
+            cat notes.md
+            echo
+            echo "---"
+            echo "**Versione di laboratorio, non per la produzione.** L'installer non è ancora firmato digitalmente: Windows e i browser possono segnalarlo."
+            echo "Verifica gli allegati con \`SHA256SUMS.txt\` e con l'attestazione di provenienza:"
+            echo "\`gh attestation verify <file> --repo ${GITHUB_REPOSITORY}\`"
+          } > release-notes.md
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'assets/*'
+      - name: Creazione della bozza (da pubblicare a mano)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          PRE=""; case "$TAG" in *-alpha.*|*-beta.*|*-rc.*) PRE="--prerelease";; esac
+          gh release create "$TAG" assets/* --verify-tag --draft $PRE \
+            --title "EMP ${TAG#v}" --notes-file release-notes.md

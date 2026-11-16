@@ -16,6 +16,7 @@ on:
       - 'tools/**'
       - '.github/workflows/desk-windows.yml'
   workflow_dispatch:
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -130,6 +131,8 @@ jobs:
           Copy-Item ../../README.md dist/INSTALLATION.md
           Copy-Item ../../Cargo.lock dist/Cargo.lock
           Copy-Item pacchetti/emp-packages.json dist/emp-packages.json
+          New-Item -ItemType Directory -Force dist/pacchetti | Out-Null
+          Copy-Item pacchetti/*.zip dist/pacchetti/
           Copy-Item windows-dependencies.txt dist/windows-dependencies.txt
           cargo tree --locked | Set-Content dist/dependencies.txt
           if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed' }

@@ -1,0 +1,17 @@
+name: Proponi una funzione
+description: Un'idea o un miglioramento
+labels: [proposta]
+body:
+  - type: textarea
+    id: bisogno
+    attributes:
+      label: Quale bisogno risolve
+      description: Descrivi la situazione in negozio o nel lavoro quotidiano.
+    validations:
+      required: true
+  - type: textarea
+    id: proposta
+    attributes:
+      label: Proposta
+    validations:
+      required: true

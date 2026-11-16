@@ -48,10 +48,15 @@ jobs:
           TAG="$GITHUB_REF_NAME"; V="${TAG#v}"
           php tools/check-release.php "$TAG" --note=notes.md
 
-          # Pacchetti dei moduli: gli stessi inclusi nell'installer Windows.
-          # Ogni ZIP deve corrispondere all'impronta dell'indice.
-          jq -r '.packages[] | "\(.sha256)  \(.file)"' windows/emp-packages.json > pacchetti.sha256
-          (cd windows/pacchetti && sha256sum -c ../../pacchetti.sha256)
+          # Pacchetto del Core: lo stesso incluso nell'installer Windows,
+          # che deve contenere solo emp-core con l'impronta dell'indice.
+          test "$(jq -r '[.packages[].id] | join(",")' windows/emp-packages.json)" = "emp-core"
+          jq -r '.packages[] | "\(.sha256)  \(.file)"' windows/emp-packages.json > core.sha256
+          (cd windows/pacchetti && sha256sum -c ../../core.sha256)
+
+          # Catalogo dei plugin, da copiare nella cartella catalog_dir del Core
+          # (esclusi i plugin dimostrativi).
+          php tools/build-packages.php plugin catalogo
 
           mkdir -p assets kit
           shopt -s nullglob
@@ -62,7 +67,10 @@ jobs:
           (cd kit && sha256sum ./*.exe > SHA256SUMS.txt)
           (cd kit && zip -X -q "../assets/EMP-Desk-${V}-windows-x64-UNSIGNED.zip" ./*)
 
-          cp windows/pacchetti/*.zip windows/emp-packages.json assets/
+          cp windows/pacchetti/emp-core-*.zip assets/
+          if [ "$(jq '.packages | length' catalogo/emp-packages.json)" -gt 0 ]; then
+            cp catalogo/*.zip catalogo/emp-packages.json assets/
+          fi
           cp windows/dependencies.txt "assets/EMP-Desk-${V}-dependencies.txt"
           cp windows/Cargo.lock "assets/EMP-Desk-${V}-Cargo.lock"
           (cd assets && sha256sum ./* | sed 's# \./# #' > SHA256SUMS.txt)
@@ -73,6 +81,11 @@ jobs:
             echo
             echo "---"
             echo "**Versione di laboratorio, non per la produzione.** L'installer non è ancora firmato digitalmente: Windows e i browser possono segnalarlo."
+            echo
+            echo "- \`EMP-Desk-…-windows-x64-UNSIGNED.zip\`: installer di EMP Desk, che installa il Core."
+            echo "- \`emp-core-….zip\`: pacchetto del Core già incluso nell'installer (per verifica)."
+            echo "- \`emp-packages.json\` e \`emp-<plugin>-….zip\`, se presenti: catalogo dei plugin da copiare nella cartella \`catalog_dir\` del Core e installare dalla pagina Plugin."
+            echo
             echo "Verifica gli allegati con \`SHA256SUMS.txt\` e con l'attestazione di provenienza:"
             echo "\`gh attestation verify <file> --repo ${GITHUB_REPOSITORY}\`"
           } > release-notes.md

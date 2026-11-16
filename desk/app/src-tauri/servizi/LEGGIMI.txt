@@ -1,0 +1,2 @@
+Cartella del programma emp-servizi (installazione dell'ambiente e servizio EMPServer).
+La CI lo compila con il manifest dei componenti incorporato.

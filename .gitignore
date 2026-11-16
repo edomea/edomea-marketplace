@@ -30,3 +30,10 @@ Thumbs.db
 /desk/app/src-tauri/gen/
 /desk/app/src-tauri/php/*
 !/desk/app/src-tauri/php/LEGGIMI.txt
+/desk/app/src-tauri/mariadb/*
+!/desk/app/src-tauri/mariadb/LEGGIMI.txt
+/desk/app/src-tauri/caddy/*
+!/desk/app/src-tauri/caddy/LEGGIMI.txt
+/desk/app/src-tauri/servizi/*
+!/desk/app/src-tauri/servizi/LEGGIMI.txt
+/desk/app/src-tauri/runtime-manifest.json

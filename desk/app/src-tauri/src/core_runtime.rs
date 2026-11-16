@@ -264,6 +264,14 @@ pub fn open_in_browser(url: &str) -> Result<(), String> {
     if !url.starts_with(&format!("{}/", base_url())) {
         return Err("Indirizzo non consentito".into());
     }
+    open_url(url)
+}
+
+/// Apre un indirizzo locale del Core (laboratorio su :8180 o ambiente definitivo su :80).
+pub fn open_url(url: &str) -> Result<(), String> {
+    if !(url.starts_with(&format!("{}/", base_url())) || url.starts_with("http://127.0.0.1/")) {
+        return Err("Indirizzo non consentito".into());
+    }
     #[cfg(windows)]
     let result = {
         use std::os::windows::process::CommandExt;

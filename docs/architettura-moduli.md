@@ -126,10 +126,10 @@ Entrambi sono generati dalla CI e pubblicati nella release GitHub approvata. In 
 ### Modalità Server
 
 1. **Preflight**: sistema operativo, architettura, RAM, spazio, porte 80/443/3306, processi e servizi esistenti. Nessuna sovrascrittura di servizi preesistenti.
-2. **Ambiente** (Macro 2): PHP con estensioni, MariaDB e Nginx da pacchetti ufficiali verificati, servizi ad avvio automatico, MariaDB solo su loopback.
+2. **Ambiente** (Macro 2): PHP, MariaDB e Caddy ufficiali verificati, servizio di Windows ad avvio automatico, tutto solo su loopback ([dettagli](ambiente-server-windows.md)).
 3. **Core**: Desk legge l'indice incluso nell'installer, che deve contenere **solo** `emp-core`; verifica lo SHA-256 e mostra all'operatore versione inclusa, versione installata e operazione (installa, aggiorna, invariato). Rifiuta una versione più vecchia o una versione già usata con contenuto diverso.
 4. Estrae il pacchetto in `<dati>/modules/emp-core/`, rifiutando percorsi assoluti, `..` e collegamenti simbolici; scrive i file in una cartella temporanea e li attiva solo a estrazione completata. La versione precedente resta in `modules/.precedenti/`.
-5. Il Core esegue le proprie migrazioni (`php bin/emp installa`; dalla Macro 2 lo farà Desk automaticamente).
+5. Il Core esegue le proprie migrazioni, lanciate automaticamente dall'installazione dell'ambiente.
 6. Lo stato è registrato in `<dati>/modules/installed.json`.
 
 ### Modalità Client

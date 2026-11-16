@@ -7,6 +7,10 @@ const planBtn = $("plan"), planTable = $("plan-table"), confirmBox = $("confirm-
 const installBtn = $("install"), cancelBtn = $("cancel"), coreStatus = $("core-status");
 const runBox = $("run-box"), runState = $("run-state"), runUrl = $("run-url"), runMsg = $("run-msg");
 const runStart = $("run-start"), runOpen = $("run-open"), runStop = $("run-stop");
+const envBox = $("env-box"), labBox = $("lab-box"), envMsg = $("env-msg"), envLog = $("env-log");
+const envInstall = $("env-install"), envOpen = $("env-open"), envRemove = $("env-remove");
+
+const SERVIZIO = { in_esecuzione: "in esecuzione", fermo: "fermo", assente: "non installato", in_avvio: "in avvio", in_arresto: "in arresto" };
 
 const ACTIONS = { installa: "Installa", aggiorna: "Aggiorna", invariato: "Già installato" };
 
@@ -22,9 +26,49 @@ function selectedMode() {
 
 function applyMode(mode, saved) {
   clientBox.hidden = mode !== "client";
-  // Le sezioni Core e Avvio compaiono solo quando la modalità Server è salvata.
-  coreBox.hidden = !(mode === "server" && saved);
-  if (mode === "server" && saved) refreshRun(); else runBox.hidden = true;
+  // Ambiente e laboratorio compaiono solo quando la modalità Server è salvata.
+  const server = mode === "server" && saved;
+  envBox.hidden = !server;
+  labBox.hidden = !server;
+  coreBox.hidden = !server;
+  if (server) { refreshEnv(); refreshRun(); } else runBox.hidden = true;
+}
+
+/** Stato dell'ambiente Server (servizio EMPServer). */
+function showEnv(st) {
+  const installed = st.servizio && st.servizio !== "assente" && st.servizio !== "sconosciuto";
+  $("env-service").textContent = !st.disponibile ? "disponibile solo su Windows" : (SERVIZIO[st.servizio] || st.servizio);
+  const core = $("env-core");
+  core.textContent = st.core_raggiungibile ? "raggiungibile" : (installed ? "non raggiungibile" : "—");
+  core.className = st.core_raggiungibile ? "ok" : "";
+  envInstall.textContent = installed ? "Aggiorna ambiente" : "Installa ambiente";
+  envInstall.disabled = !st.disponibile;
+  envOpen.disabled = !st.core_raggiungibile;
+  envRemove.hidden = !installed;
+}
+
+async function refreshEnv() {
+  try { showEnv(await invoke("env_status")); } catch (e) { say(envMsg, String(e), true); }
+}
+
+async function elevated(command, busyText) {
+  envInstall.disabled = true; envRemove.disabled = true;
+  envLog.hidden = true;
+  say(envMsg, busyText);
+  try {
+    const out = await invoke(command);
+    showEnv(out.stato);
+    if (out.registro && out.registro.length) { envLog.textContent = out.registro.join("\n"); envLog.hidden = out.ok; }
+    say(envMsg, out.ok
+      ? (command === "env_install" ? "Ambiente pronto. Premi \"Apri amministrazione\"." : "Ambiente disinstallato. I dati sono stati conservati.")
+      : "Operazione non riuscita (codice " + out.codice + "): vedi il registro qui sotto.", !out.ok);
+    if (!out.ok) envLog.hidden = false;
+  } catch (e) {
+    say(envMsg, String(e), true);
+  } finally {
+    envRemove.disabled = false;
+    await refreshEnv();
+  }
 }
 
 /** Stato del Core in modalità laboratorio: installato, PHP incluso, in esecuzione. */
@@ -84,7 +128,7 @@ save.addEventListener("click", async () => {
     const s = await invoke("save_settings", { mode, serverUrl: mode === "client" ? serverUrl.value : null });
     if (s.server_url) serverUrl.value = s.server_url;
     say(status, mode === "server"
-      ? "Modalità Server salvata. Puoi installare il Core."
+      ? "Modalità Server salvata. Puoi installare l'ambiente."
       : "Modalità Client salvata. La verifica della connessione TLS al Server arriverà con la Macro 3.");
     applyMode(mode, true);
   } catch (e) {
@@ -146,6 +190,13 @@ runOpen.addEventListener("click", async () => {
 runStop.addEventListener("click", async () => {
   try { showRun(await invoke("core_stop")); say(runMsg, "Core fermato."); } catch (e) { say(runMsg, String(e), true); }
 });
+
+envInstall.addEventListener("click", () => elevated("env_install", "Installazione in corso: conferma la richiesta di Windows e attendi qualche minuto..."));
+envOpen.addEventListener("click", async () => { try { await invoke("env_open"); } catch (e) { say(envMsg, String(e), true); } });
+$("env-refresh").addEventListener("click", refreshEnv);
+envRemove.addEventListener("click", () => { $("env-confirm").hidden = false; });
+$("env-remove-no").addEventListener("click", () => { $("env-confirm").hidden = true; });
+$("env-remove-yes").addEventListener("click", () => { $("env-confirm").hidden = true; elevated("env_uninstall", "Disinstallazione in corso: conferma la richiesta di Windows..."); });
 
 invoke("load_settings").then((s) => {
   for (const el of document.querySelectorAll("input[name=mode]")) el.checked = el.value === s.mode;

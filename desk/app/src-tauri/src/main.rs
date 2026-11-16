@@ -6,6 +6,7 @@
 //! del Core (pagina Plugin), non da Desk.
 
 mod core_runtime;
+mod environment;
 
 use core_runtime::CoreProcess;
 use emp_core_installer::CoreStep;
@@ -201,6 +202,47 @@ fn core_stop(app: tauri::AppHandle) -> Result<core_runtime::Status, String> {
     core_status(app)
 }
 
+/// Stato dell'ambiente Server (servizio EMPServer).
+#[tauri::command]
+async fn env_status(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
+    tauri::async_runtime::spawn_blocking(move || environment::status(&resources)).await.map_err(|e| e.to_string())
+}
+
+/// Installa o aggiorna l'ambiente (richiesta UAC). Restituisce esito e ultime righe del registro.
+#[tauri::command]
+async fn env_install(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    require_server(&app)?;
+    env_elevated(app, "installa").await
+}
+
+/// Rimuove servizio e programmi; i dati restano (richiesta UAC).
+#[tauri::command]
+async fn env_uninstall(app: tauri::AppHandle) -> Result<serde_json::Value, String> {
+    env_elevated(app, "disinstalla").await
+}
+
+async fn env_elevated(app: tauri::AppHandle, action: &'static str) -> Result<serde_json::Value, String> {
+    let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let exe = environment::servizi_exe(&resources).ok_or("Programma emp-servizi non incluso in questa installazione di EMP Desk")?;
+    let params = if action == "installa" {
+        format!("installa --sorgente {}", environment::quote_arg(&resources.display().to_string()))
+    } else {
+        action.to_string()
+    };
+    // In laboratorio e ambiente definitivo non devono contendersi gli stessi file: il Core di laboratorio si ferma.
+    core_runtime::stop(app.state::<CoreProcess>().inner());
+    let res = resources.clone();
+    let code = tauri::async_runtime::spawn_blocking(move || environment::run_elevated(&exe, &params)).await.map_err(|e| e.to_string())??;
+    let status = tauri::async_runtime::spawn_blocking(move || environment::status(&res)).await.map_err(|e| e.to_string())?;
+    Ok(serde_json::json!({ "ok": code == 0, "codice": code, "registro": environment::log_tail(15), "stato": status }))
+}
+
+#[tauri::command]
+fn env_open() -> Result<(), String> {
+    core_runtime::open_url(environment::ADMIN_URL)
+}
+
 /// Apre la pagina di amministrazione del Core (primo setup, accesso, plugin) nel browser.
 #[tauri::command]
 fn core_open(app: tauri::AppHandle) -> Result<(), String> {
@@ -278,7 +320,11 @@ fn main() {
             core_status,
             core_start,
             core_stop,
-            core_open
+            core_open,
+            env_status,
+            env_install,
+            env_uninstall,
+            env_open
         ])
         .build(tauri::generate_context!())
         .expect("Avvio EMP Desk non riuscito")

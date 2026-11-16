@@ -32,3 +32,10 @@ footer{color:#45616b}
 .hint{color:#45616b}
 code{background:#edf3f5;padding:2px 6px;border-radius:4px;user-select:all}
 @media(prefers-color-scheme:dark){.lab{background:#3a2f17;color:#f3dfb4}code{background:#14242c}.hint{color:#b4cbd2}}
+table.kv{width:auto;margin:10px 0}table.kv th{font-weight:600;padding-right:16px}
+button.danger{background:#a3261b}
+details#lab-box{background:#fff;border:1px solid #d4e0e4;border-radius:12px;padding:12px 18px;margin:16px 0}
+details#lab-box summary{cursor:pointer;font-weight:600}
+details#lab-box section{border:0;padding:0;margin:12px 0}
+.ok{color:#1f6f43;font-weight:600}
+@media(prefers-color-scheme:dark){details#lab-box{background:#20343d;border-color:#49616b}.ok{color:#7fd4a2}}

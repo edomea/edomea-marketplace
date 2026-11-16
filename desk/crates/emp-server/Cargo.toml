@@ -1,0 +1,25 @@
+[package]
+name = "emp-server"
+version = "0.5.0-alpha.2"
+description = "EMP Server: installazione dell'ambiente Windows (MariaDB, PHP, Caddy) e servizio di supervisione"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "emp-servizi"
+path = "src/main.rs"
+
+[dependencies]
+emp-core-installer = { path = "../emp-core-installer" }
+getrandom = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+
+[target.'cfg(windows)'.dependencies]
+windows-service = "0.8"
+windows-sys = { version = "0.61", features = ["Win32_UI_Shell", "Win32_Foundation"] }
+
+[dev-dependencies]
+tempfile = "3"

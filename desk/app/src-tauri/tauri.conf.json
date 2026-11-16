@@ -44,7 +44,10 @@
     },
     "resources": {
       "pacchetti/": "pacchetti/",
-      "php/": "php/"
+      "php/": "php/",
+      "mariadb/": "mariadb/",
+      "caddy/": "caddy/",
+      "servizi/": "servizi/"
     }
   }
 }

@@ -13,8 +13,8 @@ declare(strict_types=1);
  * - Plugin: plugins/<id>/ → <id>-<versione>.zip, se contiene emp-module.json
  *   (le cartelle con solo il README sono plugin previsti, non ancora sviluppati).
  *   I plugin dimostrativi (emp-esempio) sono inclusi solo con --con-esempi.
- * - Archivi riproducibili: voci ordinate e data fissa, così la stessa sorgente
- *   produce la stessa impronta SHA-256.
+ * - Archivi riproducibili: voci ordinate, data fissa e permessi decisi dal percorso
+ *   (bin/ eseguibile), così la stessa sorgente produce la stessa impronta SHA-256.
  * Solo PHP + ZipArchive (regola Edomea).
  */
 if (PHP_SAPI !== 'cli' || !class_exists(ZipArchive::class)) {
@@ -91,7 +91,7 @@ function package(string $dir, string $out): array
         $name = "{$id}/{$rel}";
         $zip->addFile($dir . '/' . $rel, $name);
         $zip->setMtimeName($name, FIXED_MTIME);
-        $zip->setExternalAttributesName($name, ZipArchive::OPSYS_UNIX, (is_executable($dir . '/' . $rel) ? 0100755 : 0100644) << 16);
+        $zip->setExternalAttributesName($name, ZipArchive::OPSYS_UNIX, (str_starts_with($rel, 'bin/') ? 0100755 : 0100644) << 16);
     }
     $zip->close();
 

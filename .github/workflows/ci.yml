@@ -111,7 +111,7 @@ jobs:
           # Gestione dalla console.
           sudo emp-server stato
           sudo emp-server backup
-          sudo ls /var/lib/emp/backup/*/database.sql.gz
+          sudo sh -c 'ls /var/lib/emp/backup/*/database.sql.gz'
           printf 'Recupero-Console-CI-2026\n' | sudo emp-server recupero-tecnico tecnico | grep -q 'Nuova Recovery Key: EMP-'
           curl -fsS "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
           sudo ufw status | tee /dev/stderr | grep -q '443/tcp'

@@ -7,7 +7,7 @@ declare(strict_types=1);
  *
  *   php tools/check-release.php <tag> [--note=<file>]
  *
- * - il tag è "v" + la versione di EMP Desk (es. v0.5.0-alpha.1);
+ * - il tag è "v" + la versione di EMP Desk (es. v0.5.0-alpha.2);
  * - la versione coincide in desk/app/src-tauri/Cargo.toml e tauri.conf.json;
  * - CHANGELOG.md ha una sezione "## [<versione>]" con data gg/mm/aaaa;
  * - i manifest di Core e plugin hanno versioni valide;
@@ -28,7 +28,7 @@ $errors = [];
 $semver = '/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:alpha|beta|rc)\.(?:0|[1-9]\d*))?$/';
 
 if (!preg_match('/^v(.+)$/', $tag, $m) || !preg_match($semver, $m[1])) {
-    fwrite(STDERR, "Tag non valido: \"{$tag}\" (atteso v<versione>, es. v0.5.0-alpha.1)\n");
+    fwrite(STDERR, "Tag non valido: \"{$tag}\" (atteso v<versione>, es. v0.5.0-alpha.2)\n");
     exit(1);
 }
 $version = $m[1];

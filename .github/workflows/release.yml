@@ -1,5 +1,5 @@
 name: EMP Release
-# Si avvia solo quando il titolare crea un tag v<versione> (es. v0.5.0-alpha.2).
+# Si avvia solo quando il titolare crea un tag v<versione> (es. v0.5.0-alpha.3).
 # Produce una BOZZA di pre-release: niente viene pubblicato finché il titolare
 # non la rivede e la pubblica a mano. Il job di pubblicazione richiede inoltre
 # l'approvazione dell'ambiente "release".

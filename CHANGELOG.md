@@ -2,12 +2,12 @@
 
 Formato: una sezione per versione di EMP Desk, data in formato gg/mm/aaaa. Le versioni non vengono mai riutilizzate.
 
-## [0.5.0-alpha.2] — 16/11/2026
+## [0.5.0-alpha.3] — 16/11/2026
 
 Prima versione di laboratorio di **EMP — Edomea Marketplace**, nata dalla fusione di Edomea (Ecosistema 1.0) e VenVia 0.4. **Non adatta alla produzione.**
 
 ### Contenuto
-- **EMP Desk 0.5.0-alpha.2** (Windows x64), derivato da VenVia Desk 0.4 Alpha 4:
+- **EMP Desk 0.5.0-alpha.3** (Windows x64), derivato da VenVia Desk 0.4 Alpha 4:
   - diagnostica del computer (sistema, CPU, RAM, dischi, porte 80/443/3306, processi runtime);
   - modalità Server o Client salvata in modo persistente; il Client accetta solo un indirizzo `https://`;
   - in modalità Server: **installazione automatica dell'ambiente** (Macro 2): MariaDB 11.4 LTS, PHP 8.3 e Caddy inclusi nell'installer e verificati, servizio di Windows *EMP Server* ad avvio automatico (account LocalService), tutto solo su `127.0.0.1`, password casuali, Core installato e database preparato; permessi di amministratore richiesti solo per installare, aggiornare o disinstallare; i dati non vengono mai cancellati;

@@ -6,7 +6,7 @@ body:
     id: versione
     attributes:
       label: Versione
-      description: Ad esempio EMP Desk 0.5.0-alpha.2
+      description: Ad esempio EMP Desk 0.5.0-alpha.3
     validations:
       required: true
   - type: dropdown

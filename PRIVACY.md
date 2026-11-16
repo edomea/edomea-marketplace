@@ -1,6 +1,6 @@
 # Privacy
 
-Informativa tecnica sul software EMP (Edomea Marketplace), versione 0.5.0-alpha.2.
+Informativa tecnica sul software EMP (Edomea Marketplace), versione 0.5.0-alpha.3.
 
 ## EMP Desk
 - **Non invia dati** a server esterni, al titolare del progetto o a terzi: nessuna telemetria, nessuna statistica d'uso.

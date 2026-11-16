@@ -8,7 +8,7 @@
 |---|---|---|
 | 0.4 | 15/11/2026 | Baseline di progettazione (titolo di lavoro "VenVia") |
 | 0.4.2 | 16/11/2026 | Accesso con sola password (funzionamento offline), Recovery Key del Tecnico; TOTP/OTP rimossi |
-| 0.4.1 | 15/11/2026 | Il progetto assume il nome **Edomea Marketplace**; precisata la natura white label; regole di partecipazione open source e di approvazione delle modifiche; linguaggio di Edomea Desk: Rust |
+| 0.4.1 | 15/11/2026 | Il progetto assume il nome **Edomea Marketplace**; precisata la natura white label; regole di partecipazione open source e di approvazione delle modifiche; linguaggio di Edomea Desk: Rust; licenza AGPL-3.0 |
 
 ---
 
@@ -188,7 +188,7 @@ GitHub è la piattaforma ufficiale per codice, issue, test, release e pacchetti.
   - una nuova modifica dopo l'approvazione richiede una nuova approvazione.
 - Le release ufficiali sono pubblicate solo dal titolare.
 - La GitHub App resta sotto controllo esclusivo del titolare; nessuna credenziale privata distribuita. I collaboratori operano con account propri.
-- Licenza open source e condizioni d'uso del marchio white label da formalizzare (vedi 09, decisioni aperte).
+- Licenza del codice: **GNU AGPL-3.0**. Chi modifica il software e lo offre come servizio, anche online, deve pubblicarne il sorgente alle stesse condizioni; i contributi esterni sono distribuiti con la stessa licenza. Le condizioni d'uso del marchio Edomea per le installazioni white label restano da formalizzare (vedi 09).
 
 ### Pipeline richiesta
 
@@ -227,7 +227,7 @@ Portabilità bidirezionale locale/Web da mantenere nei limiti dei servizi e dei 
 
 ### Decisioni e verifiche ancora aperte
 
-Framework GUI di Desk, web server e packaging; versioni OS/CPU; discovery e fiducia crittografica; Master Recovery Key per i backup cifrati; protocollo di sincronizzazione e inventario; compatibilità fiscale; licenza open source del codice e condizioni d'uso del marchio Edomea; obiettivi prestazionali e di recupero. Nessun test è dichiarato superato. Il manuale si basa sulle decisioni recuperate dalle conversazioni 0.2–0.4, non su un confronto integrale con il file originale della 0.2.
+Framework GUI di Desk, web server e packaging; versioni OS/CPU; discovery e fiducia crittografica; Master Recovery Key per i backup cifrati; protocollo di sincronizzazione e inventario; compatibilità fiscale; condizioni d'uso del marchio Edomea (la licenza del codice, AGPL-3.0, è decisa); obiettivi prestazionali e di recupero. Nessun test è dichiarato superato. Il manuale si basa sulle decisioni recuperate dalle conversazioni 0.2–0.4, non su un confronto integrale con il file originale della 0.2.
 
 ---
 

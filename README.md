@@ -39,4 +39,6 @@ Il codice è open source. Il nome e il marchio **Edomea** restano del titolare d
 
 ## Licenza
 
-In definizione.
+Il codice è distribuito con licenza **GNU Affero General Public License v3.0** ([LICENSE](LICENSE)). Chiunque può usarlo, studiarlo, modificarlo e ridistribuirlo; chi lo modifica e lo offre come servizio, anche online, deve rendere disponibile il codice sorgente delle proprie modifiche alle stesse condizioni.
+
+La licenza riguarda il codice, non il marchio Edomea.

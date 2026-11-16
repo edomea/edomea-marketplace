@@ -11,12 +11,19 @@ Prima versione di laboratorio di **EMP — Edomea Marketplace**, nata dalla fusi
   - diagnostica del computer (sistema, CPU, RAM, dischi, porte 80/443/3306, processi runtime);
   - modalità Server o Client salvata in modo persistente; il Client accetta solo un indirizzo `https://`;
   - in modalità Server: installazione e aggiornamento del **solo Core**, incluso nell'installer, con verifica SHA-256 ed estrazione sicura.
-- **EMP Core 0.1.0** (PHP 8.2+): registro dei moduli, ordine per dipendenze, migrazioni tracciate, API `GET /api/v1/salute`, riga di comando `bin/emp`, e **pagina web Plugin** per installare gli altri plugin dal catalogo.
+- **EMP Core 0.1.0** (PHP 8.2+): registro dei moduli, ordine per dipendenze, migrazioni tracciate, API `GET /api/v1/salute`, riga di comando `bin/emp`, e **pagina web Plugin** (riservata al Tecnico) per installare gli altri plugin dal catalogo.
+- **Servizio Accesso** del Core, funzionante **senza Internet**:
+  - primo setup dell'unico Amministratore Tecnico, senza account predefiniti;
+  - accesso con nome utente e password per tutti (password solo come hash, blocco dopo tentativi falliti);
+  - ruoli separati: il Tecnico gestisce gli amministratori, gli amministratori gestiscono gli operatori;
+  - cambio password, password temporanee, revoca degli accessi, disattivazione;
+  - Recovery Key del Tecnico, mostrata una sola volta e sostituita a ogni utilizzo;
+  - registro degli eventi di sicurezza senza segreti.
 - Cartelle descrittive dei plugin previsti in `plugins/` (nessun plugin di produzione ancora sviluppato).
 
 ### Limiti noti
 - L'installer **non è firmato**: Windows SmartScreen e i browser possono segnalarlo.
-- PHP, MariaDB e Nginx non vengono ancora installati da Desk: le migrazioni del Core si eseguono con `php bin/emp installa` e la pagina Plugin richiede un web server configurato a mano.
-- La gestione dei plugin funziona solo dal computer Server finché non c'è il servizio Accesso (login e permessi).
+- PHP, MariaDB e Nginx non vengono ancora installati da Desk: le migrazioni del Core si eseguono con `php bin/emp installa` e le pagine web richiedono un web server configurato a mano.
+- Senza HTTPS in LAN le password viaggiano in chiaro sulla rete del negozio: primo setup, recupero del Tecnico e plugin sono quindi possibili solo dal computer Server.
 - Nessuna verifica TLS del Server da parte del Client.
 - Collaudo su Windows 11 pulito da completare.

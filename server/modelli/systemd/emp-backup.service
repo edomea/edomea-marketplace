@@ -1,0 +1,7 @@
+[Unit]
+Description=EMP Server — backup del database e della configurazione
+After=mariadb.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/emp-server backup

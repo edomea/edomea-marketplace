@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Emp\Core\Tests;
 
-use Emp\Core\Http\LocalAdminGuard;
+use Emp\Core\Http\AdminGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Kernel;
 use Emp\Core\Module\Installer;
@@ -83,12 +83,12 @@ final class PluginManagerTest extends TestCase
         $this->writeIndex([$this->esempio()]);
         $overview = $this->manager()->overview();
         self::assertTrue($overview['catalogo']);
-        self::assertSame('0.1.1', $overview['core']);
+        self::assertSame('0.1.2', $overview['core']);
         self::assertSame('installabile', $overview['plugin'][0]['stato']);
         self::assertSame(['emp-core' => '>=0.1.0 <0.2.0'], $overview['plugin'][0]['dipendenze']);
 
         $log = $this->manager()->install('emp-esempio', 'tecnico');
-        self::assertSame(['File di emp-esempio 0.1.0 estratti dal catalogo', 'emp-core 0.1.1 già installato', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
+        self::assertSame(['File di emp-esempio 0.1.0 estratti dal catalogo', 'emp-core 0.1.2 già installato', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
         self::assertSame('installato', $this->manager()->overview()['plugin'][0]['stato']);
 
         $kernel = new Kernel($this->modules, $this->installer, new Clock(), $this->catalog);
@@ -106,7 +106,7 @@ final class PluginManagerTest extends TestCase
         $log = $this->manager()->install('emp-figlio', 'tecnico');
         self::assertSame('File di emp-base 0.1.0 estratti dal catalogo', $log[0]);
         self::assertSame('File di emp-figlio 0.1.0 estratti dal catalogo', $log[1]);
-        self::assertSame(['emp-base' => '0.1.0', 'emp-core' => '0.1.1', 'emp-figlio' => '0.1.0'], $this->installer->installed());
+        self::assertSame(['emp-base' => '0.1.0', 'emp-core' => '0.1.2', 'emp-figlio' => '0.1.0'], $this->installer->installed());
 
         try {
             $this->manager()->uninstall('emp-base', 'tecnico');
@@ -166,27 +166,25 @@ final class PluginManagerTest extends TestCase
         self::assertFalse($manager->overview()['catalogo']);
     }
 
-    public function testLocalAdminGuard(): void
+    public function testAdminGuard(): void
     {
-        $local = ['host' => '127.0.0.1:8080', LocalAdminGuard::HEADER => '1'];
         $headers = static fn (array $h): array => array_change_key_case($h, CASE_LOWER);
-        self::assertNull(LocalAdminGuard::check(new Request('GET', '/api/v1/plugin', $headers(['host' => 'localhost']), '127.0.0.1')));
-        self::assertNull(LocalAdminGuard::check(new Request('POST', '/api/v1/plugin/x/installa', $headers($local), '::1')));
-        // Da un'altra postazione.
-        self::assertSame(403, LocalAdminGuard::check(new Request('GET', '/api/v1/plugin', $headers(['host' => 'localhost']), '192.168.1.20'))?->status);
-        // DNS rebinding: Host non locale.
-        self::assertSame(403, LocalAdminGuard::check(new Request('GET', '/api/v1/plugin', $headers(['host' => 'evil.example']), '127.0.0.1'))?->status);
-        // Modifica senza intestazione dedicata (es. form da un altro sito).
-        self::assertSame(403, LocalAdminGuard::check(new Request('POST', '/api/v1/plugin/x/installa', $headers(['host' => 'localhost']), '127.0.0.1'))?->status);
-        // Origine estranea.
-        self::assertSame(403, LocalAdminGuard::check(new Request('POST', '/api/v1/plugin/x/installa', $headers($local + ['origin' => 'https://evil.example']), '127.0.0.1'))?->status);
+        // Dal computer stesso.
+        self::assertNull(AdminGuard::check(new Request('GET', '/api/v1/plugin', $headers(['host' => 'localhost']), '127.0.0.1')));
+        self::assertNull(AdminGuard::check(new Request('POST', '/api/v1/plugin/x/installa', $headers(['host' => '127.0.0.1:8080']), '::1')));
+        // Da un'altra postazione in HTTPS: consentito.
+        self::assertNull(AdminGuard::check(new Request('GET', '/api/v1/plugin', $headers(['host' => '192.168.1.10', 'x-emp-https' => '1']), '192.168.1.20')));
+        // Da un'altra postazione in HTTP: rifiutato.
+        self::assertSame(403, AdminGuard::check(new Request('GET', '/api/v1/plugin', $headers(['host' => '192.168.1.10']), '192.168.1.20'))?->status);
+        // DNS rebinding: Host non locale in HTTP.
+        self::assertSame(403, AdminGuard::check(new Request('GET', '/api/v1/plugin', $headers(['host' => 'evil.example']), '127.0.0.1'))?->status);
     }
 
     public function testApiEndpointsThroughKernel(): void
     {
         $this->writeIndex([$this->esempio()]);
         $kernel = new Kernel($this->modules, $this->installer, new Clock(), $this->catalog);
-        $anon = ['host' => 'localhost', strtolower(LocalAdminGuard::HEADER) => '1'];
+        $anon = ['host' => 'localhost', strtolower(AdminGuard::HEADER) => '1'];
 
         // Senza accesso: rifiutato. Dopo il setup e il login del Tecnico: consentito.
         self::assertSame(401, $kernel->handle(new Request('GET', '/api/v1/plugin', $anon, '127.0.0.1'))->status);
@@ -199,6 +197,10 @@ final class PluginManagerTest extends TestCase
         self::assertSame('installabile', json_decode($list->body, true)['plugin'][0]['stato']);
 
         self::assertSame(403, $kernel->handle(new Request('POST', '/api/v1/plugin/emp-esempio/installa', $h, '10.0.0.5'))->status);
+        // Senza intestazione dedicata (form da un altro sito): rifiutato da CsrfGuard.
+        self::assertSame(403, $kernel->handle(new Request('POST', '/api/v1/plugin/emp-esempio/installa', ['host' => 'localhost', 'cookie' => $h['cookie']], '127.0.0.1'))->status);
+        // Origine estranea: rifiutata.
+        self::assertSame(403, $kernel->handle(new Request('POST', '/api/v1/plugin/emp-esempio/installa', $h + ['origin' => 'https://evil.example'], '127.0.0.1'))->status);
         $ok = $kernel->handle(new Request('POST', '/api/v1/plugin/emp-esempio/installa', $h, '127.0.0.1'));
         self::assertSame(200, $ok->status, $ok->body);
         self::assertSame('tecnico', $this->pdo->query("SELECT installed_by FROM emp_modules WHERE id = 'emp-esempio'")->fetchColumn());
@@ -208,6 +210,6 @@ final class PluginManagerTest extends TestCase
 
         $off = $kernel->handle(new Request('POST', '/api/v1/plugin/emp-esempio/disinstalla', $h, '127.0.0.1'));
         self::assertSame(200, $off->status);
-        self::assertSame(['emp-core' => '0.1.1'], $this->installer->installed());
+        self::assertSame(['emp-core' => '0.1.2'], $this->installer->installed());
     }
 }

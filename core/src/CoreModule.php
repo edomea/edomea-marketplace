@@ -8,7 +8,7 @@ use Emp\Core\Access\AccessException;
 use Emp\Core\Access\AccessService;
 use Emp\Core\Access\Role;
 use Emp\Core\Access\User;
-use Emp\Core\Http\LocalAdminGuard;
+use Emp\Core\Http\AdminGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
 use Emp\Core\Module\Manifest;
@@ -25,11 +25,11 @@ use Emp\Core\Plugin\PackageException;
  *
  * Accesso (vedi docs/accesso-sicurezza.md)
  *   GET  /api/v1/accesso/stato                 setup completato? utente della sessione
- *   POST /api/v1/accesso/setup                 primo setup del Tecnico (solo dal Server, una volta)
+ *   POST /api/v1/accesso/setup                 primo setup del Tecnico (HTTPS + codice di setup, una volta)
  *   POST /api/v1/accesso/login                 accesso con nome utente e password
  *   POST /api/v1/accesso/logout                uscita
  *   POST /api/v1/accesso/password              cambio della propria password
- *   POST /api/v1/accesso/recupero              recupero del Tecnico con Recovery Key (solo dal Server)
+ *   POST /api/v1/accesso/recupero              recupero del Tecnico con Recovery Key (solo HTTPS)
  *
  * Utenti (Tecnico → amministratori, amministratori → operatori)
  *   GET  /api/v1/utenti
@@ -39,7 +39,7 @@ use Emp\Core\Plugin\PackageException;
  *   POST /api/v1/utenti/{id}/disattiva
  *   POST /api/v1/utenti/{id}/attiva
  *
- * Plugin (solo Tecnico, solo dal Server)
+ * Plugin (solo Tecnico, solo HTTPS)
  *   GET  /api/v1/plugin
  *   POST /api/v1/plugin/{id}/installa
  *   POST /api/v1/plugin/{id}/disinstalla
@@ -64,12 +64,25 @@ final class CoreModule implements ModuleInterface
         $r->add('GET', '/api/v1/accesso/stato', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
             $user = $access()->userForToken($q->cookie(self::COOKIE));
 
-            return Response::json(['inizializzato' => $access()->isInitialized(), 'utente' => $user?->toArray()]);
+            return Response::json([
+                'inizializzato' => $access()->isInitialized(),
+                'utente' => $user?->toArray(),
+                // Per le pagine: funzioni sensibili disponibili? serve il codice di setup?
+                'protetto' => AdminGuard::check($q) === null,
+                'codice_setup' => !AdminGuard::isLocal($q),
+            ]);
         }));
 
-        $r->add('POST', '/api/v1/accesso/setup', $id, static fn (Request $q): Response => LocalAdminGuard::check($q) ?? self::run(
+        $r->add('POST', '/api/v1/accesso/setup', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(
             static fn (): Response => Response::json([
-                'recovery_key' => $access()->setupTecnico($q->input('username'), $q->input('nome'), $q->input('password')),
+                'recovery_key' => $access()->setupTecnico(
+                    $q->input('username'),
+                    $q->input('nome'),
+                    $q->input('password'),
+                    $q->input('codice'),
+                    !AdminGuard::isLocal($q),
+                    $q->remoteAddr,
+                ),
             ]),
         ));
 
@@ -92,7 +105,7 @@ final class CoreModule implements ModuleInterface
             return Response::json(['ok' => true, 'messaggio' => 'Password aggiornata. Le altre sessioni sono state chiuse.']);
         }));
 
-        $r->add('POST', '/api/v1/accesso/recupero', $id, static fn (Request $q): Response => LocalAdminGuard::check($q) ?? self::run(
+        $r->add('POST', '/api/v1/accesso/recupero', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(
             static fn (): Response => Response::json([
                 'recovery_key' => $access()->recoverTecnico($q->input('username'), $q->input('recovery_key'), $q->input('nuova'), $q->remoteAddr),
             ]),
@@ -136,19 +149,19 @@ final class CoreModule implements ModuleInterface
         }
 
         // ---- Plugin (funzione tecnica) ------------------------------------------------
-        $r->add('GET', '/api/v1/plugin', $id, static fn (Request $q): Response => LocalAdminGuard::check($q) ?? self::run(static function () use ($kernel, $access, $q): Response {
+        $r->add('GET', '/api/v1/plugin', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($kernel, $access, $q): Response {
             self::requireUser($access(), $q, false, Role::TECNICO);
 
             return Response::json($kernel->plugins()->overview());
         }));
 
-        $r->add('POST', '/api/v1/plugin/{id}/installa', $id, static fn (Request $q): Response => LocalAdminGuard::check($q) ?? self::run(static function () use ($kernel, $access, $q): Response {
+        $r->add('POST', '/api/v1/plugin/{id}/installa', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($kernel, $access, $q): Response {
             $user = self::requireUser($access(), $q, false, Role::TECNICO);
 
             return Response::json(['ok' => true, 'operazioni' => $kernel->plugins()->install($q->param('id'), $user->username)]);
         }));
 
-        $r->add('POST', '/api/v1/plugin/{id}/disinstalla', $id, static fn (Request $q): Response => LocalAdminGuard::check($q) ?? self::run(static function () use ($kernel, $access, $q): Response {
+        $r->add('POST', '/api/v1/plugin/{id}/disinstalla', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($kernel, $access, $q): Response {
             $user = self::requireUser($access(), $q, false, Role::TECNICO);
             $kernel->plugins()->uninstall($q->param('id'), $user->username);
 

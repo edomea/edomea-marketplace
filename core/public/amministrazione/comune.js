@@ -78,7 +78,7 @@ const EMP = {
       key,
       "",
       "Serve a reimpostare la password dell'Amministratore Tecnico dalla pagina",
-      "/amministrazione/recupero.html del computer Server. Dopo l'uso viene",
+      "/amministrazione/recupero.html di EMP (indirizzo https://). Dopo l'uso viene",
       "sostituita da una nuova chiave. Conservare questo file offline.",
     ].join("\r\n");
     container.replaceChildren();
@@ -92,7 +92,7 @@ const EMP = {
     warn.className = "avviso";
     warn.textContent = "ATTENZIONE — La Recovery Key consente di reimpostare la password dell'Amministratore Tecnico. "
       + "Viene mostrata una sola volta e non può essere recuperata. Conservare il file in un luogo sicuro, preferibilmente offline. "
-      + "Chi entra in possesso della chiave e accede al computer Server può prendere il controllo dell'installazione.";
+      + "Chi entra in possesso della chiave e raggiunge EMP dalla rete del negozio può prendere il controllo dell'installazione.";
     const dl = document.createElement("button");
     dl.type = "button";
     dl.textContent = "Scarica la Recovery Key (TXT)";

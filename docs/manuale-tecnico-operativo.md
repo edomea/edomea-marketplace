@@ -7,8 +7,8 @@
 | Revisione | Data | Modifiche |
 |---|---|---|
 | 0.4 | 15/11/2026 | Baseline di progettazione (titolo di lavoro "VenVia") |
-| 0.4.2 | 16/11/2026 | Accesso con sola password (funzionamento offline), Recovery Key del Tecnico; TOTP/OTP rimossi |
 | 0.4.1 | 15/11/2026 | Il progetto assume il nome **Edomea Marketplace**; precisata la natura white label; regole di partecipazione open source e di approvazione delle modifiche; linguaggio di Edomea Desk: Rust; licenza AGPL-3.0 |
+| 0.4.2 | 16/11/2026 | Accesso con sola password (funzionamento offline), Recovery Key del Tecnico; TOTP/OTP rimossi |
 
 ---
 

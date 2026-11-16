@@ -1,0 +1,169 @@
+#!/usr/bin/env bash
+# EMP Server — installazione avviata da GitHub Actions sul runner della VM del negozio.
+#
+#   printf '%s\n' "$GITHUB_TOKEN" | sudo -n emp-installa-da-github <run_id>
+#
+# Eseguito come root tramite sudo dall'utente "emp-runner" (unico comando consentito).
+# Non si fida di ciò che il runner gli passa: scarica DA SOLO il pacchetto dall'esecuzione
+# <run_id> di edomea/edomea-marketplace e prima di installare verifica che:
+#   - l'esecuzione appartenga a questo repository (non a un fork) e al workflow configurato;
+#   - sia stata avviata a mano (workflow_dispatch) da un utente autorizzato;
+#   - sia in corso e avviata da poco (niente riuso di esecuzioni vecchie);
+#   - l'artefatto corrisponda all'impronta registrata da GitHub e alle impronte del pacchetto.
+# Il token (su stdin, mai negli argomenti) serve solo a scaricare l'artefatto.
+# I log di Actions di un repository pubblico sono pubblici: codici di setup e Recovery Key
+# vengono nascosti nell'output; il registro completo resta sul Server (solo root).
+set -euo pipefail
+umask 077
+
+readonly CONF=/etc/emp/github.conf
+readonly LOGDIR=/var/log/emp
+readonly API=https://api.github.com
+
+die() { echo "ERRORE: $*" >&2; exit 1; }
+info() { echo "==> $*"; }
+# Nasconde codice di setup, Recovery Key e qualsiasi codice EMP-XXXXX-... nell'output pubblico.
+nascondi() { sed -uE 's/EMP-[A-Z0-9]{4,}(-[A-Z0-9]{4,})+/EMP-[nascosto]/g'; }
+
+[[ $EUID -eq 0 ]] || die "va eseguito con sudo"
+
+# ----------------------------------------------------------------- configurazione
+# Formato CHIAVE=valore, letto senza eseguire codice. File di root, non modificabile dal runner.
+REPO=edomea/edomea-marketplace
+WORKFLOW=.github/workflows/installa-server.yml
+ARTEFATTO=emp-server-pacchetto
+AUTORIZZATI=''
+ETA_MASSIMA_MIN=180
+EMP_NOME_DNS=''
+if [[ -f $CONF ]]; then
+    [[ $(stat -c '%U %a' "$CONF") =~ ^root\ [0-7]?[0-7][0145][0145]$ ]] || die "$CONF deve appartenere a root e non essere scrivibile da altri"
+    while IFS='=' read -r chiave valore; do
+        [[ $chiave =~ ^(REPO|WORKFLOW|ARTEFATTO|AUTORIZZATI|ETA_MASSIMA_MIN|EMP_NOME_DNS)$ ]] || continue
+        valore=${valore%\"}; valore=${valore#\"}
+        printf -v "$chiave" '%s' "$valore"
+    done < "$CONF"
+fi
+[[ $REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "REPO non valido in $CONF"
+[[ $ETA_MASSIMA_MIN =~ ^[0-9]+$ ]] || die "ETA_MASSIMA_MIN non valido"
+# Predefinito: solo il proprietario del repository.
+[[ -n $AUTORIZZATI ]] || AUTORIZZATI=${REPO%%/*}
+
+# ----------------------------------------------------------------- argomenti
+RUN_ID=${1:-}
+[[ $RUN_ID =~ ^[0-9]{1,20}$ ]] || die "uso: emp-installa-da-github <run_id>  (token GitHub su stdin)"
+TOKEN=''
+IFS= read -r -t 10 TOKEN || true
+[[ $TOKEN =~ ^[A-Za-z0-9_.-]{20,400}$ ]] || die "token GitHub mancante o non valido su stdin"
+
+for cmd in curl jq unzip sha256sum tar flock; do
+    command -v "$cmd" >/dev/null || die "manca il comando $cmd (rieseguire prepara-runner.sh)"
+done
+
+exec 9>/run/emp-installa-da-github.lock
+flock -n 9 || die "un'altra installazione da GitHub è in corso"
+
+LAVORO=$(mktemp -d /root/.emp-github-XXXXXX)
+trap 'rm -rf "$LAVORO"' EXIT
+# Il token va in un file (non negli argomenti di curl, visibili con ps).
+printf 'Authorization: Bearer %s\n' "$TOKEN" > "$LAVORO/intestazione"
+unset TOKEN
+
+api() {
+    curl -fsS --proto '=https' --tlsv1.2 --max-time 60 --retry 3 \
+        -H @"$LAVORO/intestazione" -H 'Accept: application/vnd.github+json' \
+        -H 'X-GitHub-Api-Version: 2022-11-28' "$API/repos/$REPO/$1"
+}
+
+# ----------------------------------------------------------------- 1. esecuzione
+info "Verifica dell'esecuzione $RUN_ID su $REPO"
+api "actions/runs/$RUN_ID" > "$LAVORO/run.json" || die "esecuzione $RUN_ID non trovata in $REPO"
+
+campo() { jq -r "$1 // \"\"" "$LAVORO/run.json"; }
+[[ $(campo .repository.full_name) == "$REPO" ]] || die "l'esecuzione non appartiene a $REPO"
+[[ $(campo .head_repository.full_name) == "$REPO" ]] || die "codice proveniente da un altro repository (fork): rifiutato"
+percorso=$(campo .path)
+[[ $percorso == "$WORKFLOW" || $percorso == "$WORKFLOW@"* ]] || die "workflow non autorizzato: $percorso"
+[[ $(campo .event) == workflow_dispatch ]] || die "l'installazione deve essere avviata a mano (evento: $(campo .event))"
+[[ $(campo .status) == in_progress ]] || die "l'esecuzione non è in corso (stato: $(campo .status))"
+
+autorizzato() { [[ " ${AUTORIZZATI//,/ } " == *" $1 "* ]]; }
+attore=$(campo .actor.login)
+avviante=$(campo .triggering_actor.login)
+autorizzato "$attore" || die "utente non autorizzato: $attore"
+autorizzato "$avviante" || die "utente non autorizzato: $avviante"
+
+avvio=$(jq -r '.run_started_at // .created_at | fromdateiso8601' "$LAVORO/run.json")
+eta=$(( ( $(date +%s) - avvio ) / 60 ))
+(( eta >= -5 && eta <= ETA_MASSIMA_MIN )) || die "esecuzione avviata $eta minuti fa (massimo $ETA_MASSIMA_MIN): rifiutata"
+info "Esecuzione #$(campo .run_number) avviata da $avviante sul branch $(campo .head_branch) ($(campo .head_sha | cut -c1-12))"
+
+# ----------------------------------------------------------------- 2. artefatto
+api "actions/runs/$RUN_ID/artifacts?name=$ARTEFATTO" > "$LAVORO/artefatti.json"
+[[ $(jq '[.artifacts[] | select(.name == "'"$ARTEFATTO"'" and .expired == false)] | length' "$LAVORO/artefatti.json") == 1 ]] \
+    || die "artefatto $ARTEFATTO assente o non univoco nell'esecuzione $RUN_ID"
+artefatto() { jq -r '.artifacts[] | select(.name == "'"$ARTEFATTO"'" and .expired == false) | '"$1"' // ""' "$LAVORO/artefatti.json"; }
+[[ $(artefatto .workflow_run.id) == "$RUN_ID" ]] || die "l'artefatto non appartiene all'esecuzione $RUN_ID"
+id_artefatto=$(artefatto .id)
+[[ $id_artefatto =~ ^[0-9]+$ ]] || die "identificativo dell'artefatto non valido"
+impronta_attesa=$(artefatto .digest)
+
+info "Download del pacchetto (artefatto $id_artefatto)"
+# Il reindirizzamento porta allo storage di GitHub: curl non vi inoltra l'intestazione Authorization.
+curl -fsS --proto '=https' --tlsv1.2 --max-time 600 --retry 3 --max-filesize 524288000 -L \
+    -H @"$LAVORO/intestazione" -H 'X-GitHub-Api-Version: 2022-11-28' \
+    "$API/repos/$REPO/actions/artifacts/$id_artefatto/zip" -o "$LAVORO/artefatto.zip"
+rm -f "$LAVORO/intestazione"
+
+if [[ -n $impronta_attesa ]]; then
+    [[ "sha256:$(sha256sum "$LAVORO/artefatto.zip" | cut -d' ' -f1)" == "$impronta_attesa" ]] \
+        || die "impronta dell'artefatto diversa da quella registrata da GitHub"
+    info "Impronta dell'artefatto verificata ($impronta_attesa)"
+else
+    echo "Avviso: GitHub non ha fornito l'impronta dell'artefatto; restano le verifiche dell'esecuzione e del pacchetto."
+fi
+
+# ----------------------------------------------------------------- 3. pacchetto
+mkdir "$LAVORO/a"
+unzip -q "$LAVORO/artefatto.zip" -d "$LAVORO/a"
+mapfile -t archivi < <(find "$LAVORO/a" -maxdepth 1 -type f -name 'emp-server-*.tar.gz' -printf '%f\n')
+(( ${#archivi[@]} == 1 )) || die "l'artefatto deve contenere un solo emp-server-*.tar.gz"
+archivio=${archivi[0]}
+[[ $archivio =~ ^emp-server-[0-9A-Za-z.+~-]+\.tar\.gz$ ]] || die "nome del pacchetto non valido: $archivio"
+nome=${archivio%.tar.gz}
+[[ -f "$LAVORO/a/$archivio.sha256" ]] || die "manca $archivio.sha256"
+( cd "$LAVORO/a" && sha256sum --check --strict --quiet "$archivio.sha256" ) || die "impronta del pacchetto non corrispondente"
+# Ogni voce deve stare dentro la cartella del pacchetto: niente percorsi assoluti o "..".
+if tar -tzf "$LAVORO/a/$archivio" | grep -Ev "^$nome(/|$)" | grep -q . \
+   || tar -tzf "$LAVORO/a/$archivio" | grep -qE '(^|/)\.\.(/|$)'; then
+    die "il pacchetto contiene percorsi non ammessi"
+fi
+mkdir "$LAVORO/p"
+tar -xzf "$LAVORO/a/$archivio" -C "$LAVORO/p" --no-same-owner
+cartella="$LAVORO/p/$nome"
+[[ -x "$cartella/installa.sh" ]] || die "installa.sh mancante nel pacchetto"
+info "Pacchetto $nome verificato"
+
+# ----------------------------------------------------------------- 4. installazione
+install -d -m 0750 "$LOGDIR"
+registro="$LOGDIR/github-installa-$(date +%Y%m%d-%H%M%S)-$RUN_ID.log"
+: > "$registro"; chmod 0600 "$registro"
+{
+    echo "Esecuzione $RUN_ID · $(campo .html_url) · avviata da $avviante · $(campo .head_branch)@$(campo .head_sha)"
+    echo "Pacchetto: $archivio · impronta $(cut -d' ' -f1 "$LAVORO/a/$archivio.sha256")"
+} >> "$registro"
+
+info "Esecuzione di installa.sh (registro completo sul Server: $registro)"
+set +e
+( cd "$cartella" && env EMP_NOME_DNS="$EMP_NOME_DNS" ./installa.sh ) 2>&1 | tee -a "$registro" | nascondi
+esito=${PIPESTATUS[0]}
+set -e
+(( esito == 0 )) || die "installa.sh terminato con errore ($esito): vedere $registro sul Server"
+
+if command -v emp-server >/dev/null; then
+    info "Stato del Server"
+    emp-server stato 2>&1 | tee -a "$registro" | nascondi || die "il Server non risulta in salute"
+fi
+
+echo
+echo "Installazione completata. I codici (setup, Recovery Key) non compaiono nei log di GitHub, che sono pubblici:"
+echo "per il primo setup usare dalla console della VM:  sudo emp-server codice-setup"

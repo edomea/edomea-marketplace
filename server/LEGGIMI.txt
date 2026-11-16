@@ -20,5 +20,8 @@ Gestione:   sudo emp-server stato | indirizzi | codice-setup | backup | certific
 Recupero:   sudo emp-server recupero-tecnico NOME   (se la Recovery Key è persa)
 Rimozione:  sudo ./disinstalla.sh                    (i dati restano)
 
+Installazione e aggiornamento da GitHub (runner sulla VM, nessuna porta aperta):
+  docs/installazione-da-github.md
+
 Guida completa: docs/ambiente-server-linux.md nel repository edomea/edomea-marketplace.
 Licenza: AGPL-3.0.

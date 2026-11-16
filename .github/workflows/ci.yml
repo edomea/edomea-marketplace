@@ -38,7 +38,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - run: shellcheck -x server/installa.sh server/emp-server server/disinstalla.sh tools/build-server.sh
+      - run: shellcheck -x server/installa.sh server/emp-server server/disinstalla.sh tools/build-server.sh server/github/emp-installa-da-github server/github/prepara-runner.sh
       - name: Pacchetto riproducibile
         run: |
           set -euo pipefail

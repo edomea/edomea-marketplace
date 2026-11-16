@@ -27,7 +27,7 @@ set -euo pipefail
 SOURCE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 readonly SOURCE_DIR
 # Funzioni e percorsi condivisi con il comando di gestione.
-# shellcheck source=emp-server
+# shellcheck source-path=SCRIPTDIR source=emp-server
 source "$SOURCE_DIR/emp-server"
 umask 022
 
@@ -83,6 +83,12 @@ install_packages() {
         nginx mariadb-server mariadb-client \
         php-fpm php-cli php-mysql php-mbstring php-zip \
         openssl ca-certificates curl ufw unattended-upgrades lsb-release
+    # In una macchina virtuale VMware: strumenti per lo spegnimento ordinato insieme al PC che la ospita.
+    if [[ $(systemd-detect-virt 2>/dev/null || true) == vmware ]]; then
+        apt-get install -y -q --no-install-recommends open-vm-tools
+        systemctl enable -q --now open-vm-tools 2>/dev/null || true
+        info "Macchina virtuale VMware: open-vm-tools attivi"
+    fi
     PHP_VERSION=$(php_version)
     readonly PHP_VERSION
     php -r "exit(version_compare(PHP_VERSION, '${MIN_PHP}', '>=') ? 0 : 1);" || die "serve PHP ${MIN_PHP} o successivo (trovato ${PHP_VERSION})"

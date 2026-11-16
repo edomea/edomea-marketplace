@@ -13,8 +13,12 @@ EMP è in fase di laboratorio (versioni `alpha`). Le correzioni di sicurezza ven
 
 ## Come sono prodotte le release
 
-- Ogni build Windows passa: audit delle dipendenze Rust (avvisi bloccanti, salvo eccezioni motivate nel workflow), Clippy con warning bloccanti, test, scansione Microsoft Defender, impronte SHA-256.
-- `Cargo.lock` è versionato e la build usa esattamente quelle dipendenze (`--locked`).
+- Ogni release passa:
+  - test del Core su PHP 8.3 e 8.5;
+  - shellcheck degli script del Server;
+  - **installazione reale di EMP Server su Ubuntu 24.04 e 26.04**: HTTPS verificato, permessi, aggiornamento, disinstallazione.
+- Il pacchetto `emp-server-<versione>.tar.gz` è **riproducibile** e contiene `SHA256SUMS` di ogni file; `installa.sh` lo controlla prima di qualsiasi modifica.
+- Nginx, PHP e MariaDB non sono inclusi nel pacchetto: arrivano dai repository ufficiali di Ubuntu, con i loro aggiornamenti di sicurezza.
 - Gli allegati delle release hanno un'**attestazione di provenienza** GitHub: `gh attestation verify <file> --repo edomea/edomea-marketplace`.
 - Le release nascono come bozza e sono pubblicate solo dal titolare, dopo approvazione.
 - Nessuna credenziale, chiave, certificato privato o dato reale di clienti e negozi è presente nel repository.

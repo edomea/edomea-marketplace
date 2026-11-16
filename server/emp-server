@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+# EMP Server — comandi di gestione sulla console del Server (Ubuntu Server LTS).
+#
+#   sudo emp-server stato                          servizi, versioni, indirizzi, certificato
+#   sudo emp-server indirizzi                      indirizzi https:// per le postazioni del negozio
+#   sudo emp-server codice-setup                   nuovo codice monouso per il primo setup del Tecnico
+#   sudo emp-server recupero-tecnico NOME          nuova password del Tecnico e nuova Recovery Key
+#   sudo emp-server certificato [--se-necessario]  rigenera il certificato HTTPS (es. cambio indirizzo IP)
+#   sudo emp-server backup                         copia del database e della configurazione
+#   sudo emp-server moduli                         moduli installati (Core e plugin)
+#
+# Installato da installa.sh in /opt/emp/server, collegato in /usr/local/sbin/emp-server.
+set -euo pipefail
+umask 027
+
+readonly EMP_CONF_DIR=/etc/emp
+readonly EMP_CONFIG=$EMP_CONF_DIR/config.php
+readonly EMP_TLS=$EMP_CONF_DIR/tls
+readonly EMP_DATA=/var/lib/emp
+readonly EMP_MODULES=$EMP_DATA/moduli
+readonly EMP_BACKUP=$EMP_DATA/backup
+readonly EMP_USER=emp
+readonly EMP_HOME=/opt/emp/server
+readonly BACKUP_KEEP=14
+readonly CERT_DAYS=825
+readonly CERT_RENEW_SECONDS=$((60 * 24 * 3600))
+
+die() { echo "ERRORE: $*" >&2; exit 1; }
+info() { echo "• $*"; }
+
+require_root() {
+    [[ $EUID -eq 0 ]] || die "eseguire con sudo: sudo emp-server $*"
+}
+
+# Comando del Core (bin/emp) eseguito come utente emp, che accede a MariaDB senza password (unix_socket).
+core_cli() {
+    [[ -f $EMP_MODULES/emp-core/bin/emp ]] || die "Core non installato: eseguire installa.sh"
+    runuser -u "$EMP_USER" -- env EMP_CONFIG="$EMP_CONFIG" php "$EMP_MODULES/emp-core/bin/emp" "$@"
+}
+
+# Indirizzi IPv4 privati della macchina (quelli coperti dal certificato).
+private_ipv4() {
+    local ip
+    for ip in $(hostname -I 2>/dev/null); do
+        if [[ $ip =~ ^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.)[0-9.]+$ ]]; then
+            echo "$ip"
+        fi
+    done
+}
+
+host_name() { hostname -s | tr '[:upper:]' '[:lower:]'; }
+
+extra_dns() {
+    if [[ -f $EMP_CONF_DIR/nome-dns ]]; then tr -d '[:space:]' < "$EMP_CONF_DIR/nome-dns"; fi
+}
+
+# ---------------------------------------------------------------- certificato HTTPS
+#
+# Autorità di certificazione locale, valida SOLO per i nomi di questo Server e per
+# gli indirizzi delle reti private (name constraints): anche se la sua chiave
+# venisse sottratta, non potrebbe certificare siti Internet.
+create_ca() {
+    local name dns
+    name=$(host_name)
+    dns=$(extra_dns)
+    local constraints="permitted;DNS:${name},permitted;DNS:${name}.local,permitted;DNS:localhost"
+    [[ -n $dns ]] && constraints+=",permitted;DNS:${dns}"
+    constraints+=",permitted;IP:10.0.0.0/255.0.0.0,permitted;IP:172.16.0.0/255.240.0.0"
+    constraints+=",permitted;IP:192.168.0.0/255.255.0.0,permitted;IP:127.0.0.0/255.0.0.0"
+    info "Creazione dell'autorità di certificazione locale (valida 10 anni)"
+    openssl req -x509 -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+        -keyout "$EMP_TLS/ca.key" -out "$EMP_TLS/ca.crt" -days 3650 \
+        -subj "/O=EMP Edomea Marketplace/CN=EMP CA locale ${name}" \
+        -addext "basicConstraints=critical,CA:TRUE,pathlen:0" \
+        -addext "keyUsage=critical,keyCertSign,cRLSign" \
+        -addext "nameConstraints=critical,${constraints}" 2>/dev/null
+    chmod 0600 "$EMP_TLS/ca.key"
+    chmod 0644 "$EMP_TLS/ca.crt"
+}
+
+wanted_san() {
+    local name dns ip
+    name=$(host_name)
+    dns=$(extra_dns)
+    printf 'DNS:%s,DNS:%s.local,DNS:localhost' "$name" "$name"
+    [[ -n $dns ]] && printf ',DNS:%s' "$dns"
+    printf ',IP:127.0.0.1'
+    for ip in $(private_ipv4); do printf ',IP:%s' "$ip"; done
+}
+
+cert_needs_renewal() {
+    local crt=$EMP_TLS/server.crt ip san
+    [[ -f $crt && -f $EMP_TLS/server.key ]] || return 0
+    openssl x509 -in "$crt" -noout -checkend "$CERT_RENEW_SECONDS" >/dev/null 2>&1 || return 0
+    san=$(openssl x509 -in "$crt" -noout -ext subjectAltName 2>/dev/null | tr -d ' \n')
+    for ip in $(private_ipv4); do
+        [[ ,$san, == *",IPAddress:${ip},"* ]] || return 0
+    done
+    [[ $san == *"DNS:$(host_name),"* ]] || return 0
+    return 1
+}
+
+create_server_cert() {
+    local tmp
+    tmp=$(mktemp -d)
+    info "Creazione del certificato HTTPS del Server (valido ${CERT_DAYS} giorni)"
+    openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
+        -keyout "$tmp/server.key" -out "$tmp/server.csr" -subj "/O=EMP Edomea Marketplace/CN=$(host_name)" 2>/dev/null
+    cat > "$tmp/ext.cnf" <<EOF
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature
+extendedKeyUsage=serverAuth
+subjectAltName=$(wanted_san)
+EOF
+    openssl x509 -req -in "$tmp/server.csr" -CA "$EMP_TLS/ca.crt" -CAkey "$EMP_TLS/ca.key" \
+        -CAcreateserial -CAserial "$EMP_TLS/ca.srl" -days "$CERT_DAYS" -sha256 \
+        -extfile "$tmp/ext.cnf" -out "$tmp/server.crt" 2>/dev/null
+    cat "$tmp/server.crt" "$EMP_TLS/ca.crt" > "$tmp/fullchain.crt"
+    install -m 0600 -o root -g root "$tmp/server.key" "$EMP_TLS/server.key"
+    install -m 0644 -o root -g root "$tmp/fullchain.crt" "$EMP_TLS/server.crt"
+    rm -rf "$tmp"
+}
+
+cmd_certificato() {
+    require_root certificato
+    install -d -m 0755 -o root -g root "$EMP_TLS"
+    [[ -f $EMP_TLS/ca.crt && -f $EMP_TLS/ca.key ]] || create_ca
+    if [[ ${1:-} == --se-necessario ]] && ! cert_needs_renewal; then
+        return 0
+    fi
+    create_server_cert
+    # Certificato dell'autorità scaricabile dalle postazioni (http://SERVER/emp-ca.crt).
+    install -m 0644 -o root -g root "$EMP_TLS/ca.crt" "$EMP_DATA/pubblico/emp-ca.crt"
+    if systemctl is-active --quiet nginx; then
+        nginx -t -q && systemctl reload nginx
+    fi
+    info "Certificato valido per: $(wanted_san | tr ',' ' ')"
+}
+
+ca_fingerprint() {
+    openssl x509 -in "$EMP_TLS/ca.crt" -noout -fingerprint -sha256 | cut -d= -f2
+}
+
+# ---------------------------------------------------------------- comandi
+
+cmd_indirizzi() {
+    local ip any=0
+    for ip in $(private_ipv4); do
+        echo "  https://${ip}/amministrazione/"
+        any=1
+    done
+    echo "  https://$(host_name).local/amministrazione/   (se la rete risolve i nomi .local)"
+    [[ -n $(extra_dns) ]] && echo "  https://$(extra_dns)/amministrazione/"
+    [[ $any -eq 1 ]] || echo "  (nessun indirizzo di rete privata: controllare la scheda di rete della VM, modalità Bridged)"
+}
+
+cmd_stato() {
+    require_root stato
+    local svc state
+    echo "EMP Server $(cat "$EMP_HOME/VERSIONE" 2>/dev/null || echo '?') — $(lsb_release -ds 2>/dev/null || true)"
+    for svc in nginx "php$(php_version)-fpm" mariadb; do
+        state=$(systemctl is-active "$svc" 2>/dev/null || true)
+        printf '  %-14s %s\n' "$svc" "${state:-sconosciuto}"
+    done
+    if curl -fsS --max-time 5 --cacert "$EMP_TLS/ca.crt" --resolve "localhost:443:127.0.0.1" https://localhost/api/v1/salute >/dev/null 2>&1; then
+        echo "  Core           risponde"
+    else
+        echo "  Core           NON risponde (vedere: journalctl -u nginx, /var/log/nginx/emp-errori.log)"
+    fi
+    echo "Moduli:"
+    core_cli elenco | sed 's/^/  /' || true
+    echo "Certificato HTTPS: scade il $(openssl x509 -in "$EMP_TLS/server.crt" -noout -enddate | cut -d= -f2)"
+    echo "Impronta SHA-256 dell'autorità locale: $(ca_fingerprint)"
+    echo "Indirizzi:"
+    cmd_indirizzi
+}
+
+php_version() { php -r 'echo PHP_MAJOR_VERSION, ".", PHP_MINOR_VERSION;'; }
+
+cmd_codice_setup() {
+    require_root codice-setup
+    core_cli codice-setup
+    echo "Inserirlo nella pagina di primo setup:"
+    local ip
+    for ip in $(private_ipv4); do echo "  https://${ip}/amministrazione/setup.html"; done
+}
+
+cmd_recupero_tecnico() {
+    require_root recupero-tecnico
+    [[ -n ${1:-} ]] || die "uso: sudo emp-server recupero-tecnico NOME_UTENTE_DEL_TECNICO"
+    core_cli recupero-tecnico "--tecnico=$1"
+}
+
+cmd_backup() {
+    require_root backup
+    local stamp dest
+    stamp=$(date +%Y%m%d-%H%M%S)
+    install -d -m 0700 -o root -g root "$EMP_BACKUP"
+    dest=$EMP_BACKUP/emp-$stamp
+    install -d -m 0700 "$dest"
+    mariadb-dump --single-transaction --routines --events --databases emp | gzip -9 > "$dest/database.sql.gz"
+    # Configurazione e moduli (inclusa la chiave dell'autorità locale: la cartella è riservata a root).
+    tar -czf "$dest/configurazione.tar.gz" -C / etc/emp var/lib/emp/moduli var/lib/emp/catalogo 2>/dev/null
+    ( cd "$dest" && sha256sum ./*.gz > SHA256SUMS )
+    info "Backup creato: $dest"
+    # Conserva solo gli ultimi BACKUP_KEEP.
+    find "$EMP_BACKUP" -mindepth 1 -maxdepth 1 -type d -name 'emp-*' | sort -r | tail -n +$((BACKUP_KEEP + 1)) | xargs -r rm -rf --
+}
+
+cmd_moduli() {
+    require_root moduli
+    core_cli elenco
+}
+
+usage() {
+    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+main() {
+    local cmd=${1:-}
+    shift || true
+    case $cmd in
+        stato) cmd_stato ;;
+        indirizzi) cmd_indirizzi ;;
+        codice-setup) cmd_codice_setup ;;
+        recupero-tecnico) cmd_recupero_tecnico "$@" ;;
+        certificato) cmd_certificato "$@" ;;
+        backup) cmd_backup ;;
+        moduli) cmd_moduli ;;
+        -h | --help | aiuto | '') usage ;;
+        *) usage >&2; exit 2 ;;
+    esac
+}
+
+# Le funzioni sono riusate da installa.sh (source) senza eseguire main.
+if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+    main "$@"
+fi

@@ -1,6 +1,8 @@
 # EMP — Fusione Edomea + VenVia
 
-Versione 0.1 · 15/11/2026 · **Proposta da approvare**
+Versione 0.2 · 16/11/2026 · **Proposta da approvare**
+
+> Aggiornamento del 16/11/2026: per decisione del titolare **EMP Desk (Rust/Tauri) è stato eliminato**. Il Server del negozio è **EMP Server su Ubuntu Server LTS**, anche in una macchina virtuale, e le postazioni usano il browser in HTTPS ([ambiente](ambiente-server-linux.md)).
 
 EMP (Edomea Marketplace) nasce dall'unione di due linee di lavoro:
 
@@ -11,18 +13,18 @@ EMP (Edomea Marketplace) nasce dall'unione di due linee di lavoro:
 
 | Da VenVia | Da Edomea |
 |---|---|
-| Desk Rust/Tauri, modalità Server e Client | Funzioni gestionali collaudate in negozio |
+| Server del negozio autonomo (oggi EMP Server su Ubuntu; Desk Rust/Tauri eliminato) | Funzioni gestionali collaudate in negozio |
 | Core PHP API-first, non dipendente da WordPress | Autorizzazione centralizzata (`WCMAN_Access`) |
 | Operatività LAN senza Internet, sincronizzazione con Centrale | Tracciabilità di ogni modifica (utente, ora, prima/dopo) |
 | Control Center, backup, staging, migrazioni | Registro movimenti come unica fonte delle giacenze (`wcmag_movements`) |
-| Gate di sicurezza CI (audit, Clippy, Defender, SHA-256) | Regole su orari locali, formato date, `store_id=0`, versioni mai riutilizzate |
+| Gate di sicurezza CI (installazione reale, shellcheck, SHA-256, attestazione) | Regole su orari locali, formato date, `store_id=0`, versioni mai riutilizzate |
 | Design System VenVia | Standard delle app frontend (SPA autonome, header, helper JS) |
 
 ## Decisioni di fusione
 
 1. **Il nome è EMP / Edomea Marketplace.** I nomi VenVia restano solo nello storico.
-2. **WordPress non è un prerequisito del server locale.** Il Core gira su PHP + MariaDB + Caddy installati da Desk. WordPress/WooCommerce restano il canale web facoltativo (EMP Web). Questo chiude il "punto da riconciliare" dell'handover VenVia (§2).
-3. **EMP Desk installa solo il Core**; tutti gli altri plugin si installano dall'interfaccia web del Core (pagina *Plugin*). Desk resta l'installatore dell'ambiente, il Core governa l'ecosistema dei plugin.
+2. **WordPress non è un prerequisito del server locale.** Il Core gira su Nginx + PHP-FPM + MariaDB installati da EMP Server (Ubuntu). WordPress/WooCommerce restano il canale web facoltativo (EMP Web). Questo chiude il "punto da riconciliare" dell'handover VenVia (§2).
+3. **EMP Server installa solo il Core**; tutti gli altri plugin si installano dall'interfaccia web del Core (pagina *Plugin*). EMP Server prepara l'ambiente, il Core governa l'ecosistema dei plugin.
 4. **I plugin Edomea diventano moduli EMP**, uno alla volta, sopra il Core. Finché un modulo EMP non è collaudato, il plugin Edomea corrispondente resta in uso: nessuna sostituzione forzata.
 5. **I servizi trasversali passano nel Core**: autorizzazione, tracciabilità (audit), orologio locale, anagrafica clienti condivisa, generatore EAN, registro migrazioni.
 6. **Negozio Zero (Cirò Marina)** è la prima installazione: priorità P0 dell'handover (login/ruoli, Studio, giacenze, POS, acquisti, clienti, documenti).

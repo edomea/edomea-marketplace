@@ -14,9 +14,12 @@
 <main class="stretta">
   <section id="form-box" class="box">
     <h1>Amministratore Tecnico</h1>
-    <p>Crea l'unico Amministratore Tecnico dell'installazione. Si fa una sola volta, dal computer Server.</p>
+    <p>Crea l'unico Amministratore Tecnico dell'installazione. Si fa una sola volta.</p>
+    <p id="avviso-http" class="avviso" hidden>Connessione non protetta: aprire EMP con l'indirizzo <strong>https://</strong> per completare il setup.</p>
     <p class="note">Il Tecnico gestisce sicurezza, plugin e amministratori. Non svolge automaticamente le funzioni gestionali.</p>
     <form id="setup" novalidate>
+      <label id="campo-codice">Codice di setup <input name="codice" autocomplete="one-time-code" spellcheck="false" placeholder="EMP-XXXXX-XXXXX-XXXXX" required>
+        <span class="note">Mostrato alla fine dell'installazione del Server. Se è scaduto o perso, generarne uno nuovo sulla console del Server con <code>sudo emp-server codice-setup</code>.</span></label>
       <label>Nome utente <input name="username" autocomplete="username" required></label>
       <label>Nome e cognome <input name="nome" autocomplete="name" required></label>
       <label>Password (almeno 12 caratteri) <input name="password" type="password" autocomplete="new-password" required></label>

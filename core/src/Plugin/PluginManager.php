@@ -14,7 +14,7 @@ use Emp\Core\Module\Resolver;
  * Gestione dei plugin dall'interfaccia web del Core.
  *
  * Fonti:
- * - cartella modules/: Core (installato da EMP Desk) e plugin già presenti;
+ * - cartella modules/: Core (installato da EMP Server) e plugin già presenti;
  * - catalogo: pacchetti verificati dei plugin installabili.
  *
  * Installazione di un plugin: calcolo del piano con le dipendenze, estrazione
@@ -83,7 +83,7 @@ final class PluginManager
     public function install(string $id, string $actor): array
     {
         if ($id === Manifest::CORE_ID) {
-            throw new ResolutionException('Il Core si installa e si aggiorna da EMP Desk');
+            throw new ResolutionException('Il Core si installa e si aggiorna con EMP Server (sudo ./installa.sh)');
         }
         $errors = [];
         $catalog = $this->catalogPackages($errors);
@@ -98,7 +98,7 @@ final class PluginManager
                 continue; // già presente e più recente o uguale
             }
             if ($m->isCore()) {
-                throw new ResolutionException('Il Core si aggiorna da EMP Desk');
+                throw new ResolutionException('Il Core si aggiorna con EMP Server (sudo ./installa.sh)');
             }
             $extractor->extract($package);
             $log[] = sprintf('File di %s %s estratti dal catalogo', $m->id, $m->version);

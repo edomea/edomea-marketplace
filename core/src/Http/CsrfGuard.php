@@ -19,7 +19,7 @@ final class CsrfGuard
         if ($request->method === 'GET') {
             return null;
         }
-        if ($request->header(LocalAdminGuard::HEADER) !== '1') {
+        if ($request->header(AdminGuard::HEADER) !== '1') {
             return Response::error(403, 'Richiesta non consentita');
         }
         $origin = $request->header('origin');

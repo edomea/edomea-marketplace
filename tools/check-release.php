@@ -7,8 +7,8 @@ declare(strict_types=1);
  *
  *   php tools/check-release.php <tag> [--note=<file>]
  *
- * - il tag è "v" + la versione di EMP Desk (es. v0.5.0-alpha.3);
- * - la versione coincide in desk/app/src-tauri/Cargo.toml e tauri.conf.json;
+ * - il tag è "v" + la versione di EMP Server (es. v0.6.0-alpha.1);
+ * - la versione coincide con server/VERSIONE;
  * - CHANGELOG.md ha una sezione "## [<versione>]" con data gg/mm/aaaa;
  * - i manifest di Core e plugin hanno versioni valide;
  * - con --note scrive le note di rilascio (la sezione del CHANGELOG).
@@ -28,18 +28,14 @@ $errors = [];
 $semver = '/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:alpha|beta|rc)\.(?:0|[1-9]\d*))?$/';
 
 if (!preg_match('/^v(.+)$/', $tag, $m) || !preg_match($semver, $m[1])) {
-    fwrite(STDERR, "Tag non valido: \"{$tag}\" (atteso v<versione>, es. v0.5.0-alpha.3)\n");
+    fwrite(STDERR, "Tag non valido: \"{$tag}\" (atteso v<versione>, es. v0.6.0-alpha.1)\n");
     exit(1);
 }
 $version = $m[1];
 
-$cargo = (string) file_get_contents($root . '/desk/app/src-tauri/Cargo.toml');
-if (!preg_match('/^version\s*=\s*"([^"]+)"/m', $cargo, $cm) || $cm[1] !== $version) {
-    $errors[] = 'desk/app/src-tauri/Cargo.toml: versione ' . ($cm[1] ?? '?') . " diversa da {$version}";
-}
-$tauri = json_decode((string) file_get_contents($root . '/desk/app/src-tauri/tauri.conf.json'), true);
-if (($tauri['version'] ?? null) !== $version) {
-    $errors[] = 'tauri.conf.json: versione ' . ($tauri['version'] ?? '?') . " diversa da {$version}";
+$server = trim((string) @file_get_contents($root . '/server/VERSIONE'));
+if ($server !== $version) {
+    $errors[] = 'server/VERSIONE: versione ' . ($server !== '' ? $server : '?') . " diversa da {$version}";
 }
 
 $manifests = array_merge([$root . '/core/emp-module.json'], glob($root . '/plugins/*/emp-module.json') ?: []);
@@ -65,4 +61,4 @@ if ($errors !== []) {
 if ($notesFile !== null) {
     file_put_contents($notesFile, trim($sm[2]) . "\n");
 }
-echo "Release {$tag} pronta (EMP Desk {$version}, " . count($manifests) . " manifest controllati)\n";
+echo "Release {$tag} pronta (EMP Server {$version}, " . count($manifests) . " manifest controllati)\n";

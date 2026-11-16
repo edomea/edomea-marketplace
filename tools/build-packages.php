@@ -5,11 +5,11 @@ declare(strict_types=1);
 /*
  * Costruisce i pacchetti dei moduli EMP e l'indice emp-packages.json.
  *
- *   php tools/build-packages.php core   <cartella>               pacchetto del Core, per l'installer EMP Desk
+ *   php tools/build-packages.php core   <cartella>               pacchetto del Core, per il pacchetto EMP Server
  *   php tools/build-packages.php plugin <cartella> [--con-esempi] catalogo dei plugin, per la pagina web del Core
  *
  * - Core: core/ → emp-core-<versione>.zip con la cartella emp-core/ alla radice
- *   (esclusi test, vendor e file di sviluppo). Lo installa solo EMP Desk.
+ *   (esclusi test, vendor e file di sviluppo). Lo installa solo installa.sh di EMP Server.
  * - Plugin: plugins/<id>/ → <id>-<versione>.zip, se contiene emp-module.json
  *   (le cartelle con solo il README sono plugin previsti, non ancora sviluppati).
  *   I plugin dimostrativi (emp-esempio) sono inclusi solo con --con-esempi.

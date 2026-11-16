@@ -1,2 +1,0 @@
-Cartella di MariaDB per Windows inclusa nell'installer di EMP Desk.
-La CI vi scarica la versione indicata in desk/componenti.json e ne verifica lo SHA-256.

@@ -1,0 +1,8 @@
+[Unit]
+Description=EMP Server — rinnovo del certificato HTTPS (scadenza o cambio di indirizzo IP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/emp-server certificato --se-necessario

@@ -28,3 +28,7 @@ footer{color:#45616b}
  .choices small,footer,.motto{color:#b4cbd2}
  .err{color:#ff9a8f}
 }
+.lab{border-left:4px solid #c98a1b;background:#fff7e6;padding:8px 12px;color:#5a4210}
+.hint{color:#45616b}
+code{background:#edf3f5;padding:2px 6px;border-radius:4px;user-select:all}
+@media(prefers-color-scheme:dark){.lab{background:#3a2f17;color:#f3dfb4}code{background:#14242c}.hint{color:#b4cbd2}}

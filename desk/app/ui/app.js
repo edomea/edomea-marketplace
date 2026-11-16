@@ -5,6 +5,8 @@ const status = $("status"), report = $("report"), scan = $("scan"), save = $("sa
 const clientBox = $("client-box"), serverUrl = $("server-url"), coreBox = $("core-box");
 const planBtn = $("plan"), planTable = $("plan-table"), confirmBox = $("confirm-box");
 const installBtn = $("install"), cancelBtn = $("cancel"), coreStatus = $("core-status");
+const runBox = $("run-box"), runState = $("run-state"), runUrl = $("run-url"), runMsg = $("run-msg");
+const runStart = $("run-start"), runOpen = $("run-open"), runStop = $("run-stop");
 
 const ACTIONS = { installa: "Installa", aggiorna: "Aggiorna", invariato: "Già installato" };
 
@@ -20,8 +22,24 @@ function selectedMode() {
 
 function applyMode(mode, saved) {
   clientBox.hidden = mode !== "client";
-  // La sezione Core compare solo quando la modalità Server è salvata.
+  // Le sezioni Core e Avvio compaiono solo quando la modalità Server è salvata.
   coreBox.hidden = !(mode === "server" && saved);
+  if (mode === "server" && saved) refreshRun(); else runBox.hidden = true;
+}
+
+/** Stato del Core in modalità laboratorio: installato, PHP incluso, in esecuzione. */
+function showRun(st) {
+  runBox.hidden = !st.core_installato;
+  runUrl.textContent = st.indirizzo;
+  runState.textContent = !st.php_disponibile ? "PHP non incluso in questa installazione"
+    : st.in_esecuzione ? "in esecuzione" : "fermo";
+  runStart.disabled = st.in_esecuzione || !st.php_disponibile;
+  runOpen.disabled = !st.in_esecuzione;
+  runStop.disabled = !st.in_esecuzione;
+}
+
+async function refreshRun() {
+  try { showRun(await invoke("core_status")); } catch (e) { say(runMsg, String(e), true); }
 }
 
 function renderPlan(step) {
@@ -100,12 +118,33 @@ installBtn.addEventListener("click", async () => {
   try {
     const step = await invoke("core_install");
     renderPlan({ ...step, installed_version: step.version, action: "invariato" });
-    say(coreStatus, "File del Core installati. Il database e la pagina web Plugin saranno disponibili quando l'ambiente PHP/MariaDB/Nginx sarà installato (Macro 2).");
+    say(coreStatus, "File del Core installati. Ora avvia il Core qui sotto.");
+    await refreshRun();
   } catch (e) {
     say(coreStatus, "Installazione interrotta: " + String(e), true);
   } finally {
     installBtn.disabled = false; planBtn.disabled = false;
   }
+});
+
+runStart.addEventListener("click", async () => {
+  runStart.disabled = true;
+  say(runMsg, "Preparazione del database e avvio del Core...");
+  try {
+    showRun(await invoke("core_start"));
+    say(runMsg, "Core avviato. Premi \"Apri amministrazione\" per il primo setup o per accedere.");
+  } catch (e) {
+    say(runMsg, String(e), true);
+    await refreshRun();
+  }
+});
+
+runOpen.addEventListener("click", async () => {
+  try { await invoke("core_open"); } catch (e) { say(runMsg, String(e), true); }
+});
+
+runStop.addEventListener("click", async () => {
+  try { showRun(await invoke("core_stop")); say(runMsg, "Core fermato."); } catch (e) { say(runMsg, String(e), true); }
 });
 
 invoke("load_settings").then((s) => {

@@ -5,6 +5,9 @@
 //! nell'installer. Tutti gli altri plugin si installano dall'interfaccia web
 //! del Core (pagina Plugin), non da Desk.
 
+mod core_runtime;
+
+use core_runtime::CoreProcess;
 use emp_core_installer::CoreStep;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -149,15 +152,62 @@ async fn core_plan(app: tauri::AppHandle) -> Result<CoreStep, String> {
         .map_err(|e| e.to_string())?
 }
 
-/// Installa o aggiorna i file del Core. Le migrazioni del database saranno
-/// eseguite dal Core quando l'ambiente PHP/MariaDB sarà predisposto da Desk (Macro 2).
+/// Installa o aggiorna i file del Core. Se il Core è in esecuzione viene fermato
+/// prima e riavviato dopo (modalità laboratorio).
 #[tauri::command]
 async fn core_install(app: tauri::AppHandle) -> Result<CoreStep, String> {
     require_server(&app)?;
     let (pk, md) = (packages_dir(&app)?, modules_dir(&app)?);
-    tauri::async_runtime::spawn_blocking(move || emp_core_installer::install_core(&pk, &md))
+    let was_running = core_runtime::is_running(app.state::<CoreProcess>().inner());
+    core_runtime::stop(app.state::<CoreProcess>().inner());
+    let step = tauri::async_runtime::spawn_blocking(move || emp_core_installer::install_core(&pk, &md))
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())??;
+    if was_running {
+        core_start(app).await?;
+    }
+    Ok(step)
+}
+
+fn runtime_paths(app: &tauri::AppHandle) -> Result<(PathBuf, core_runtime::Paths), String> {
+    let resources = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let data = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    Ok((resources, core_runtime::Paths::new(&data)))
+}
+
+/// Stato del Core: installato, PHP disponibile, in esecuzione, indirizzo.
+#[tauri::command]
+fn core_status(app: tauri::AppHandle) -> Result<core_runtime::Status, String> {
+    let (resources, paths) = runtime_paths(&app)?;
+    Ok(core_runtime::status(app.state::<CoreProcess>().inner(), &resources, &paths))
+}
+
+/// Prepara il database (SQLite) e avvia il Core su http://127.0.0.1:8180 (modalità laboratorio).
+#[tauri::command]
+async fn core_start(app: tauri::AppHandle) -> Result<core_runtime::Status, String> {
+    require_server(&app)?;
+    let (resources, paths) = runtime_paths(&app)?;
+    let php = core_runtime::php_binary(&resources).ok_or("PHP non è incluso in questa installazione di EMP Desk")?;
+    let handle = app.clone();
+    tauri::async_runtime::spawn_blocking(move || core_runtime::start(handle.state::<CoreProcess>().inner(), &php, &paths))
+        .await
+        .map_err(|e| e.to_string())??;
+    core_status(app)
+}
+
+#[tauri::command]
+fn core_stop(app: tauri::AppHandle) -> Result<core_runtime::Status, String> {
+    core_runtime::stop(app.state::<CoreProcess>().inner());
+    core_status(app)
+}
+
+/// Apre la pagina di amministrazione del Core (primo setup, accesso, plugin) nel browser.
+#[tauri::command]
+fn core_open(app: tauri::AppHandle) -> Result<(), String> {
+    if !core_runtime::is_running(app.state::<CoreProcess>().inner()) {
+        return Err("Avviare prima il Core".into());
+    }
+    core_runtime::open_in_browser(&format!("{}/amministrazione/", core_runtime::base_url()))
 }
 
 #[tauri::command]
@@ -218,9 +268,26 @@ async fn diagnostics() -> Result<Report, String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![diagnostics, load_settings, save_settings, core_plan, core_install])
-        .run(tauri::generate_context!())
-        .expect("Avvio EMP Desk non riuscito");
+        .manage(CoreProcess::default())
+        .invoke_handler(tauri::generate_handler![
+            diagnostics,
+            load_settings,
+            save_settings,
+            core_plan,
+            core_install,
+            core_status,
+            core_start,
+            core_stop,
+            core_open
+        ])
+        .build(tauri::generate_context!())
+        .expect("Avvio EMP Desk non riuscito")
+        .run(|app, event| {
+            // Alla chiusura di Desk il Core in modalità laboratorio si ferma.
+            if let tauri::RunEvent::Exit = event {
+                core_runtime::stop(app.state::<CoreProcess>().inner());
+            }
+        });
 }
 
 #[cfg(test)]

@@ -43,7 +43,8 @@
       }
     },
     "resources": {
-      "pacchetti/": "pacchetti/"
+      "pacchetti/": "pacchetti/",
+      "php/": "php/"
     }
   }
 }

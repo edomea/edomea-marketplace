@@ -27,10 +27,11 @@ Tutti gli altri plugin si installano **dalla pagina web Plugin del Core**, non d
 Funziona:
 - diagnostica del computer (sistema, CPU, RAM, dischi, porte 80/443/3306, processi runtime);
 - modalità **Server** o **Client** salvata in modo persistente; il Client accetta solo un indirizzo `https://` del Server;
-- in modalità Server: controllo e installazione del Core incluso nell'installer.
+- in modalità Server: controllo e installazione del Core incluso nell'installer;
+- **avvio del Core in modalità laboratorio**: PHP ufficiale per Windows incluso nell'installer (scaricato dalla CI da windows.php.net e verificato con SHA-256), database SQLite nella cartella dati, Core su `http://127.0.0.1:8180` raggiungibile solo dal computer Server finché Desk è aperto. Il pulsante *Apri amministrazione* porta al primo setup del Tecnico e all'accesso.
 
 Non ancora presente (vedi roadmap del manuale):
-- installazione automatica di PHP, MariaDB e Nginx e dei servizi (Macro 2): fino ad allora le migrazioni del Core si eseguono con `php bin/emp installa`;
+- Nginx, MariaDB e Core come servizi di Windows ad avvio automatico (Macro 2 completa);
 - DNS locale, certificati HTTPS e verifica TLS del Client (Macro 3);
 - firma Authenticode dell'installer.
 

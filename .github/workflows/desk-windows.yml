@@ -55,6 +55,37 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'PHP not available on runner' }
           php ../../../tools/build-packages.php core pacchetti
           if ($LASTEXITCODE -ne 0) { throw 'Package build failed' }
+      - name: Bundle official PHP for Windows (lab mode)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Official build from windows.php.net, PHP 8.3 NTS x64; SHA-256 from the official index.
+          $rel = Invoke-RestMethod -Uri 'https://windows.php.net/downloads/releases/releases.json'
+          $branch = $rel.'8.3'
+          $key = @($branch.PSObject.Properties.Name | Where-Object { $_ -match '^nts-vs\d+-x64$' })[0]
+          if (!$key) { throw 'PHP 8.3 NTS x64 build not found in official index' }
+          $zip = $branch.$key.zip
+          Invoke-WebRequest -Uri ("https://windows.php.net/downloads/releases/" + $zip.path) -OutFile php.zip
+          $hash = (Get-FileHash php.zip -Algorithm SHA256).Hash.ToLower()
+          if ($hash -ne $zip.sha256.ToLower()) { throw 'PHP download checksum mismatch' }
+          Remove-Item php -Recurse -Force -ErrorAction SilentlyContinue
+          Expand-Archive php.zip -DestinationPath php
+          @(
+            '; php.ini di EMP Desk (modalità laboratorio). extension_dir è passato da Desk.',
+            'extension=pdo_sqlite',
+            'extension=mbstring',
+            'extension=zip',
+            'memory_limit=256M',
+            'display_errors=Off',
+            'log_errors=On',
+            'expose_php=Off',
+            'date.timezone=Europe/Rome'
+          ) | Set-Content php/php.ini -Encoding ascii
+          Copy-Item ../../../LICENSE php/EMP-LICENSE.txt -ErrorAction SilentlyContinue
+          "PHP $($branch.version) $key $($zip.path) sha256=$hash" | Set-Content php-version.txt
+          Get-Content php-version.txt
+          & php/php.exe -c php/php.ini -d ("extension_dir=" + (Resolve-Path php/ext)) -m
+          if ($LASTEXITCODE -ne 0) { throw 'Bundled PHP does not start' }
       - name: Audit Rust dependencies
         shell: pwsh
         run: |
@@ -78,9 +109,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Clippy setup failed' }
           cargo clippy --locked --workspace --all-targets -- -D warnings
           if ($LASTEXITCODE -ne 0) { throw 'Clippy failed' }
-      - name: Test Rust
+      - name: Test Rust (including Core start with bundled PHP)
         shell: pwsh
-        run: cargo test --locked --workspace
+        run: |
+          $env:EMP_TEST_CORE_PACKAGES = (Resolve-Path pacchetti).Path
+          $env:EMP_TEST_PHP = (Resolve-Path php/php.exe).Path
+          cargo test --locked --workspace -- --nocapture
+          if ($LASTEXITCODE -ne 0) { throw 'Tests failed' }
       - name: Install Tauri CLI
         shell: pwsh
         run: cargo install tauri-cli --version "^2" --locked
@@ -131,6 +166,7 @@ jobs:
           Copy-Item ../../Cargo.lock dist/Cargo.lock
           Copy-Item pacchetti/emp-packages.json dist/emp-packages.json
           Copy-Item windows-dependencies.txt dist/windows-dependencies.txt
+          Copy-Item php-version.txt dist/php-version.txt
           cargo tree --locked | Set-Content dist/dependencies.txt
           if ($LASTEXITCODE -ne 0) { throw 'Dependency inventory failed' }
           Get-ChildItem dist/*.exe | Get-FileHash -Algorithm SHA256 | ForEach-Object { "$($_.Hash)  $([IO.Path]::GetFileName($_.Path))" } | Set-Content dist/SHA256SUMS.txt

@@ -55,8 +55,10 @@ jobs:
           PY
       - name: Clippy (warning bloccanti)
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - name: Test
-        run: cargo test --locked --workspace
+      - name: Test (compreso l'avvio reale del Core con PHP)
+        run: |
+          php ../tools/build-packages.php core "$RUNNER_TEMP/pacchetti-core"
+          EMP_TEST_CORE_PACKAGES="$RUNNER_TEMP/pacchetti-core" EMP_TEST_PHP="$(command -v php)" cargo test --locked --workspace
 
   end-to-end:
     needs: [core-php, desk-rust]

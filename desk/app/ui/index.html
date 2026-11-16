@@ -46,12 +46,24 @@
     <p id="core-status" role="status"></p>
   </section>
 
+  <section id="run-box" hidden>
+    <h2>3. Avvio del Core e amministrazione</h2>
+    <p class="lab">Modalità laboratorio: PHP incluso in Desk, database SQLite, Core raggiungibile solo da questo computer finché EMP Desk resta aperto. Nginx, MariaDB e l'avvio automatico come servizio arriveranno con la Macro 2.</p>
+    <p>Stato: <strong id="run-state">—</strong></p>
+    <p>Indirizzo dell'amministrazione: <code id="run-url">—</code></p>
+    <button id="run-start">Avvia il Core</button>
+    <button id="run-open" disabled>Apri amministrazione</button>
+    <button id="run-stop" class="secondary" disabled>Ferma</button>
+    <p class="hint">Al primo avvio la pagina chiede di creare l'<strong>Amministratore Tecnico</strong> e consegna la Recovery Key da scaricare e conservare.</p>
+    <p id="run-msg" role="status"></p>
+  </section>
+
   <section>
     <h2>Diagnostica del computer</h2>
     <button id="scan">Aggiorna diagnostica</button>
     <pre id="report" aria-live="polite">In attesa...</pre>
   </section>
-  <footer>Ambiente PHP, MariaDB e Nginx: installazione automatica prevista nella Macro 2. Core e plugin sono in PHP; i plugin si gestiscono dal Core.</footer>
+  <footer>Core e plugin sono in PHP; i plugin si installano dalla pagina Plugin dell'amministrazione del Core.</footer>
 </main>
 </body>
 </html>

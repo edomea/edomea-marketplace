@@ -163,7 +163,11 @@ pub fn http_get(path: &str, timeout: Duration) -> Result<(u16, String), String> 
     let addr: SocketAddr = format!("{HOST}:{PORT}").parse().expect("indirizzo valido");
     let mut s = TcpStream::connect_timeout(&addr, timeout).map_err(|e| e.to_string())?;
     s.set_read_timeout(Some(timeout)).map_err(|e| e.to_string())?;
-    write!(s, "GET {path} HTTP/1.0\r\nHost: {HOST}:{PORT}\r\nConnection: close\r\n\r\n").map_err(|e| e.to_string())?;
+    // Richiesta inviata in un'unica scrittura: il server integrato di PHP può
+    // chiudere la connessione se riceve una richiesta spezzata in più pacchetti.
+    let request = format!("GET {path} HTTP/1.0\r\nHost: {HOST}:{PORT}\r\nConnection: close\r\n\r\n");
+    s.write_all(request.as_bytes()).map_err(|e| e.to_string())?;
+    s.flush().map_err(|e| e.to_string())?;
     let mut buf = Vec::new();
     s.take(1_048_576).read_to_end(&mut buf).map_err(|e| e.to_string())?;
     parse_response(&String::from_utf8_lossy(&buf))
@@ -307,17 +311,25 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("emp-desk-runtime-{}", std::process::id()));
         let paths = Paths::new(&dir);
         emp_core_installer::install_core(Path::new(&packages), &paths.modules).expect("installazione del Core");
-        let state = CoreProcess::default();
-        start(&state, Path::new(&php), &paths).expect("avvio del Core");
-        assert!(is_running(&state));
+        // Ferma il Core anche se la prova fallisce, per non lasciare la porta occupata.
+        struct StopOnDrop(CoreProcess);
+        impl Drop for StopOnDrop {
+            fn drop(&mut self) {
+                stop(&self.0);
+            }
+        }
+        let guard = StopOnDrop(CoreProcess::default());
+        let state = &guard.0;
+        start(state, Path::new(&php), &paths).expect("avvio del Core");
+        assert!(is_running(state));
         let (code, body) = http_get("/api/v1/accesso/stato", Duration::from_secs(5)).unwrap();
         assert_eq!(code, 200);
         assert!(body.contains("\"inizializzato\":false"), "{body}");
         assert_eq!(http_get("/amministrazione/setup.html", Duration::from_secs(5)).unwrap().0, 200);
         // Seconda partenza: nessun errore, stesso processo.
-        start(&state, Path::new(&php), &paths).expect("già avviato");
-        stop(&state);
-        assert!(!is_running(&state));
+        start(state, Path::new(&php), &paths).expect("già avviato");
+        stop(state);
+        assert!(!is_running(state));
         let _ = fs::remove_dir_all(&dir);
     }
 

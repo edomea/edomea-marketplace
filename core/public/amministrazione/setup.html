@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
+<title>Primo setup — EMP</title>
+<link rel="stylesheet" href="stile.css">
+<script defer src="comune.js"></script>
+<script defer src="setup.js"></script>
+</head>
+<body>
+<header class="emp-header"><strong>EMP — Primo setup</strong><span id="user-badge"></span></header>
+<main class="stretta">
+  <section id="form-box" class="box">
+    <h1>Amministratore Tecnico</h1>
+    <p>Crea l'unico Amministratore Tecnico dell'installazione. Si fa una sola volta, dal computer Server.</p>
+    <p class="note">Il Tecnico gestisce sicurezza, plugin e amministratori. Non svolge automaticamente le funzioni gestionali.</p>
+    <form id="setup" novalidate>
+      <label>Nome utente <input name="username" autocomplete="username" required></label>
+      <label>Nome e cognome <input name="nome" autocomplete="name" required></label>
+      <label>Password (almeno 12 caratteri) <input name="password" type="password" autocomplete="new-password" required></label>
+      <label>Ripeti la password <input name="ripeti" type="password" autocomplete="new-password" required></label>
+      <button type="submit">Crea Amministratore Tecnico</button>
+    </form>
+  </section>
+  <section id="key-box" class="box" hidden></section>
+  <section id="done-box" class="box" hidden>
+    <h2>Setup completato</h2>
+    <p><a href="index.html">Vai all'accesso</a></p>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

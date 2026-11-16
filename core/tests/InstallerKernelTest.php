@@ -41,11 +41,14 @@ final class InstallerKernelTest extends TestCase
     public function testInstallCoreThenPluginAndBoot(): void
     {
         $log = $this->installer->install($this->plan(), 'tecnico');
-        self::assertSame(['Installato emp-core 0.1.0 (1 migrazioni)', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
+        self::assertSame(['Installato emp-core 0.1.0 (2 migrazioni)', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
         self::assertSame(['emp-core' => '0.1.0', 'emp-esempio' => '0.1.0'], $this->installer->installed());
 
         $tables = $this->pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")->fetchAll(\PDO::FETCH_COLUMN);
-        self::assertSame(['emp_core_audit', 'emp_esempio_note', 'emp_migrations', 'emp_modules'], $tables);
+        self::assertSame([
+            'emp_core_audit', 'emp_core_login_attempts', 'emp_core_sessions', 'emp_core_settings', 'emp_core_users',
+            'emp_esempio_note', 'emp_migrations', 'emp_modules',
+        ], $tables);
         $who = $this->pdo->query('SELECT DISTINCT applied_by FROM emp_migrations')->fetchAll(\PDO::FETCH_COLUMN);
         self::assertSame(['tecnico'], $who);
 
@@ -56,7 +59,9 @@ final class InstallerKernelTest extends TestCase
         $plugin = $kernel->handle(new Request('GET', '/api/v1/esempio'));
         self::assertSame(['modulo' => 'emp-esempio', 'versione' => '0.1.0'], json_decode($plugin->body, true));
         self::assertSame(404, $kernel->handle(new Request('GET', '/api/v1/inesistente'))->status);
-        self::assertSame(405, $kernel->handle(new Request('POST', '/api/v1/salute'))->status);
+        self::assertSame(405, $kernel->handle(new Request('POST', '/api/v1/salute', ['x-emp-richiesta' => '1']))->status);
+        // Senza intestazione anti-CSRF ogni richiesta che modifica è rifiutata.
+        self::assertSame(403, $kernel->handle(new Request('POST', '/api/v1/salute'))->status);
         self::assertSame(['emp-core', 'emp-esempio'], array_map(static fn ($m) => $m->id, $kernel->modules()));
     }
 

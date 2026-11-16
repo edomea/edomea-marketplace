@@ -26,6 +26,7 @@ Altre cartelle: [`docs/`](docs/) documentazione, [`tools/`](tools/) script per c
 
 - [Manuale tecnico-operativo](docs/manuale-tecnico-operativo.md): architettura, installazione, sicurezza, funzioni, sincronizzazione, disaster recovery e piano di sviluppo.
 - [Architettura modulare e installazione](docs/architettura-moduli.md): manifest dei moduli, ordine Core → plugin, pacchetti verificati.
+- [Account, ruoli e sicurezza di accesso](docs/accesso-sicurezza.md): solo password (funziona offline), ruoli, revoca degli accessi, Recovery Key del Tecnico.
 - [Fusione Edomea + VenVia](docs/fusione-edomea-venvia.md): cosa EMP prende da ciascuno e mappa dei plugin Edomea.
 
 ## Partecipare

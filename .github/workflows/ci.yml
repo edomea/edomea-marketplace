@@ -85,12 +85,18 @@ jobs:
           sleep 2
           curl -fsS $B/api/v1/salute | tee /dev/stderr | grep -q '"stato":"ok"'
           curl -fsS -o /dev/null $B/amministrazione/plugin.html
-          # 4. Pagina Plugin: elenco, protezioni, installazione.
-          curl -fsS $B/api/v1/plugin | tee /dev/stderr | grep -q '"stato":"installabile"'
-          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST $B/api/v1/plugin/emp-esempio/installa)" = 403
-          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' $B/api/v1/plugin)" = 403
-          curl -fsS -X POST -H 'X-EMP-Richiesta: 1' $B/api/v1/plugin/emp-esempio/installa | tee /dev/stderr | grep -q '"ok":true'
+          # 4. Primo setup del Tecnico e accesso (solo password, offline).
+          J=(-H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json')
+          test "$(curl -s -o /dev/null -w '%{http_code}' $B/api/v1/plugin)" = 401
+          curl -fsS "${J[@]}" -X POST $B/api/v1/accesso/setup -d '{"username":"tecnico","nome":"Tecnico CI","password":"Chiave-Sicura-CI-2026"}' | grep -q '"recovery_key":"EMP-'
+          test "$(curl -s -o /dev/null -w '%{http_code}' "${J[@]}" -X POST $B/api/v1/accesso/setup -d '{"username":"altro","nome":"Altro","password":"Chiave-Sicura-CI-2026"}')" = 409
+          curl -fsS -c "$W/jar" "${J[@]}" -X POST $B/api/v1/accesso/login -d '{"username":"tecnico","password":"Chiave-Sicura-CI-2026"}' | grep -q '"ruolo":"tecnico"'
+          # 5. Pagina Plugin: elenco, protezioni, installazione.
+          curl -fsS -b "$W/jar" $B/api/v1/plugin | tee /dev/stderr | grep -q '"stato":"installabile"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -b "$W/jar" -X POST $B/api/v1/plugin/emp-esempio/installa)" = 403
+          test "$(curl -s -o /dev/null -w '%{http_code}' -b "$W/jar" -H 'Host: evil.example' $B/api/v1/plugin)" = 403
+          curl -fsS -b "$W/jar" "${J[@]}" -X POST $B/api/v1/plugin/emp-esempio/installa | tee /dev/stderr | grep -q '"ok":true'
           curl -fsS $B/api/v1/esempio | grep -q '"modulo":"emp-esempio"'
-          # 5. Desk rieseguito: Core invariato, plugin intatto.
+          # 6. Desk rieseguito: Core invariato, plugin intatto.
           cargo run --locked -q --manifest-path desk/Cargo.toml -p emp-core-installer --example emp-install -- "$W/pacchetti-core" "$W/modules" | grep -q '^invariato emp-core'
           test -f "$W/modules/emp-esempio/emp-module.json"

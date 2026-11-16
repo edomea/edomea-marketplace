@@ -13,31 +13,10 @@ const STATI = {
   non_disponibile: "Non nel catalogo",
 };
 
-/** Chiamata alle API del Core. Le richieste che modificano portano l'intestazione X-EMP-Richiesta. */
-async function api(path, method = "GET") {
-  const opts = { method, headers: { Accept: "application/json" }, credentials: "same-origin" };
-  if (method !== "GET") opts.headers["X-EMP-Richiesta"] = "1";
-  const res = await fetch("/api/v1/" + path, opts);
-  let data = null;
-  try { data = await res.json(); } catch (_) { /* risposta non JSON */ }
-  if (!res.ok) throw new Error((data && data.errore) || "Errore " + res.status);
-  return data;
-}
-
-/** Testo sicuro per l'HTML (usato solo dove serve costruire stringhe). */
-function esc(s) {
-  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-}
-
-let toastTimer = null;
-function toast(message, isError) {
-  const el = document.getElementById("toast");
-  el.textContent = message;
-  el.classList.toggle("err", !!isError);
-  el.hidden = false;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { el.hidden = true; }, isError ? 9000 : 5000);
-}
+// Helper comuni (comune.js). Funzione riservata all'Amministratore Tecnico.
+const api = (path, method = "GET") => EMP.api(path, method);
+const esc = EMP.esc;
+const toast = EMP.toast;
 
 function cell(text, small) {
   const td = document.createElement("td");
@@ -122,8 +101,13 @@ async function load() {
       body.appendChild(tr);
     }
   } catch (e) {
-    body.innerHTML = '<tr><td colspan="6">' + esc(e.message) + "</td></tr>";
+    if (e.status === 401) {
+      location.replace("index.html");
+      return;
+    }
+    body.innerHTML = '<tr><td colspan="6">' + esc(e.message) + ' — <a href="index.html">Amministrazione</a></td></tr>';
   }
 }
 
+EMP.api("accesso/stato").then((s) => EMP.showUser(s.utente)).catch(() => {});
 load();

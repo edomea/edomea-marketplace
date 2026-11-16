@@ -154,7 +154,7 @@ Installazione di un plugin:
 3. estrae i pacchetti mancanti o più recenti con le stesse regole di sicurezza di Desk;
 4. esegue le migrazioni nell'ordine del piano, registrando l'esecutore.
 
-**Accesso provvisorio.** Finché il Core non ha il servizio Accesso (login, ruoli, MFA), queste API rispondono **solo dal computer Server**: indirizzo di loopback, intestazione `Host` locale, e per le modifiche l'intestazione `X-EMP-Richiesta` e un'eventuale `Origin` locale. Le altre postazioni ricevono `403`. Nella tracciabilità l'esecutore è `amministrazione-locale`.
+**Accesso.** La gestione dei plugin è riservata all'**Amministratore Tecnico** autenticato ([accesso e sicurezza](accesso-sicurezza.md)) e, finché non c'è HTTPS in LAN, risponde **solo dal computer Server** (indirizzo di loopback, intestazione `Host` locale). Le altre postazioni ricevono `403`. Nella tracciabilità l'esecutore è il nome utente del Tecnico.
 
 ---
 

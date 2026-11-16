@@ -186,7 +186,13 @@ final class PluginManagerTest extends TestCase
     {
         $this->writeIndex([$this->esempio()]);
         $kernel = new Kernel($this->modules, $this->installer, new Clock(), $this->catalog);
-        $h = ['host' => 'localhost', strtolower(LocalAdminGuard::HEADER) => '1'];
+        $anon = ['host' => 'localhost', strtolower(LocalAdminGuard::HEADER) => '1'];
+
+        // Senza accesso: rifiutato. Dopo il setup e il login del Tecnico: consentito.
+        self::assertSame(401, $kernel->handle(new Request('GET', '/api/v1/plugin', $anon, '127.0.0.1'))->status);
+        $kernel->access()->setupTecnico('tecnico', 'Tecnico', 'Password-Sicura-2026');
+        [$token] = $kernel->access()->login('tecnico', 'Password-Sicura-2026', '127.0.0.1');
+        $h = $anon + ['cookie' => 'emp_sessione=' . $token];
 
         $list = $kernel->handle(new Request('GET', '/api/v1/plugin', $h, '127.0.0.1'));
         self::assertSame(200, $list->status);
@@ -195,7 +201,7 @@ final class PluginManagerTest extends TestCase
         self::assertSame(403, $kernel->handle(new Request('POST', '/api/v1/plugin/emp-esempio/installa', $h, '10.0.0.5'))->status);
         $ok = $kernel->handle(new Request('POST', '/api/v1/plugin/emp-esempio/installa', $h, '127.0.0.1'));
         self::assertSame(200, $ok->status, $ok->body);
-        self::assertSame('amministrazione-locale', $this->pdo->query("SELECT installed_by FROM emp_modules WHERE id = 'emp-esempio'")->fetchColumn());
+        self::assertSame('tecnico', $this->pdo->query("SELECT installed_by FROM emp_modules WHERE id = 'emp-esempio'")->fetchColumn());
 
         $missing = $kernel->handle(new Request('POST', '/api/v1/plugin/emp-inesistente/installa', $h, '127.0.0.1'));
         self::assertSame(409, $missing->status);

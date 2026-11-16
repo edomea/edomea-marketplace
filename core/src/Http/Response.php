@@ -32,6 +32,12 @@ final class Response
         return self::json(['errore' => $message], $status);
     }
 
+    /** Copia della risposta con un'intestazione in più (es. Set-Cookie). */
+    public function withHeader(string $name, string $value): self
+    {
+        return new self($this->status, $this->body, [$name => $value] + $this->headers);
+    }
+
     public function send(): void
     {
         http_response_code($this->status);

@@ -30,6 +30,18 @@ final class Installer
         $this->pdo->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
     }
 
+    /** Connessione al database dell'installazione (per i servizi del Core). */
+    public function pdo(): \PDO
+    {
+        return $this->pdo;
+    }
+
+    /** Prefisso completo delle tabelle di un modulo: installazione + table_prefix. */
+    public function tablePrefix(string $moduleTablePrefix): string
+    {
+        return $this->installPrefix . $moduleTablePrefix;
+    }
+
     public function ensureSystemTables(): void
     {
         $p = $this->installPrefix;

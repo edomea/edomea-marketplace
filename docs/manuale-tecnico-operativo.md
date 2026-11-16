@@ -7,6 +7,7 @@
 | Revisione | Data | Modifiche |
 |---|---|---|
 | 0.4 | 15/11/2026 | Baseline di progettazione (titolo di lavoro "VenVia") |
+| 0.4.2 | 16/11/2026 | Accesso con sola password (funzionamento offline), Recovery Key del Tecnico; TOTP/OTP rimossi |
 | 0.4.1 | 15/11/2026 | Il progetto assume il nome **Edomea Marketplace**; precisata la natura white label; regole di partecipazione open source e di approvazione delle modifiche; linguaggio di Edomea Desk: Rust |
 
 ---
@@ -85,12 +86,12 @@ I pacchetti ufficiali sono distribuiti con marchio Edomea. Le installazioni whit
 2. Verificare compatibilità, spazio, permessi, porte, conflitti, servizi esistenti e percorso dati; non sovrascrivere installazioni senza autorizzazione.
 3. Installare componenti isolati, creare database con credenziali uniche e limitate, registrare servizi ad avvio automatico.
 4. Configurare identità azienda/negozio (incluso il marchio white label), nome server, indirizzo LAN, percorsi dati e backup. Creare l'Amministratore Tecnico al primo avvio, senza utenti predefiniti.
-5. Attivare MFA, generare la Master Recovery Key monouso da custodire offline, verificare recupero e completare il setup.
+5. Generare la Recovery Key del Tecnico, mostrata una sola volta e scaricabile in TXT, con conferma di custodia; completare il setup (vedi [accesso e sicurezza](accesso-sicurezza.md)).
 6. Avviare Control Center, controllare salute dei servizi e predisporre l'associazione dei client. Collegamento Web facoltativo.
 
 ### Procedura Client richiesta
 
-Selezionare Client, rilevare il server oppure inserirne nome/IP; verificare l'identità e autorizzare l'associazione. Accedere con credenziali e MFA secondo le policy. Configurare eventuali periferiche di cassa. Consentire riparazione, aggiornamento e promozione a Server tramite procedura guidata. Nessun terminale per le operazioni ordinarie.
+Selezionare Client, rilevare il server oppure inserirne nome/IP; verificare l'identità e autorizzare l'associazione. Accedere con nome utente e password. Configurare eventuali periferiche di cassa. Consentire riparazione, aggiornamento e promozione a Server tramite procedura guidata. Nessun terminale per le operazioni ordinarie.
 
 ---
 
@@ -102,7 +103,7 @@ Amministratore Tecnico unico, separato dall'Amministratore gestionale: setup, ma
 
 ### Sicurezza locale e web
 
-MFA obbligatoria secondo le policy del Core, password robuste, recovery controllato, sessioni revocabili, log di audit. TLS anche in LAN: proposta di identità/certificati privati con associazione verificata nell'app Desk, senza certificato pubblico obbligatorio. Nessuna accettazione indiscriminata di certificati. MariaDB non esposto ai client. Per Web pubblico, HTTPS con certificato attendibile e rinnovo automatico; ACME DNS-01 se applicabile.
+Accesso con nome utente e password per tutti, **senza servizi esterni** per garantire il funzionamento offline (decisione del 16/11/2026: TOTP e OTP via email rimossi); password robuste conservate solo come hash, blocco temporaneo dopo tentativi falliti, sessioni revocabili, Recovery Key del Tecnico, log di audit. Dettagli: [accesso e sicurezza](accesso-sicurezza.md). TLS anche in LAN: proposta di identità/certificati privati con associazione verificata nell'app Desk, senza certificato pubblico obbligatorio. Nessuna accettazione indiscriminata di certificati. MariaDB non esposto ai client. Per Web pubblico, HTTPS con certificato attendibile e rinnovo automatico; ACME DNS-01 se applicabile.
 
 ### Esclusività del server
 
@@ -210,7 +211,7 @@ Portabilità bidirezionale locale/Web da mantenere nei limiti dei servizi e dei 
 1. Definire contratto Core/Desk e struttura repository.
 2. Preparare pipeline GitHub per le tre piattaforme.
 3. Realizzare launcher e installer Server (Rust) con prerequisiti, servizi PHP/MariaDB/web server e disinstallazione non distruttiva.
-4. Implementare setup grafico, identità tecnica e white label, MFA/recovery e Control Center minimo.
+4. Implementare setup grafico, identità tecnica e white label, accesso con password e Recovery Key del Tecnico, Control Center minimo.
 5. Aggiungere API di salute e associazione Client.
 6. Generare release di laboratorio, non produzione.
 
@@ -226,7 +227,7 @@ Portabilità bidirezionale locale/Web da mantenere nei limiti dei servizi e dei 
 
 ### Decisioni e verifiche ancora aperte
 
-Framework GUI di Desk, web server e packaging; versioni OS/CPU; discovery e fiducia crittografica; recovery offline/MFA; protocollo di sincronizzazione e inventario; compatibilità fiscale; licenza open source del codice e condizioni d'uso del marchio Edomea; obiettivi prestazionali e di recupero. Nessun test è dichiarato superato. Il manuale si basa sulle decisioni recuperate dalle conversazioni 0.2–0.4, non su un confronto integrale con il file originale della 0.2.
+Framework GUI di Desk, web server e packaging; versioni OS/CPU; discovery e fiducia crittografica; Master Recovery Key per i backup cifrati; protocollo di sincronizzazione e inventario; compatibilità fiscale; licenza open source del codice e condizioni d'uso del marchio Edomea; obiettivi prestazionali e di recupero. Nessun test è dichiarato superato. Il manuale si basa sulle decisioni recuperate dalle conversazioni 0.2–0.4, non su un confronto integrale con il file originale della 0.2.
 
 ---
 

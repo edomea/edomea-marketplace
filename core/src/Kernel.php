@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Emp\Core;
 
+use Emp\Core\Access\AccessService;
+use Emp\Core\Http\CsrfGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
 use Emp\Core\Http\Router;
@@ -28,6 +30,7 @@ final class Kernel
     /** @var list<Manifest> */
     private array $booted = [];
     private readonly Psr4Autoloader $autoloader;
+    private ?AccessService $access = null;
 
     public function __construct(
         private readonly string $modulesDir,
@@ -89,6 +92,12 @@ final class Kernel
         return $this->booted;
     }
 
+    /** Servizio Accesso: utenti, sessioni, password, Recovery Key del Tecnico. */
+    public function access(): AccessService
+    {
+        return $this->access ??= new AccessService($this->installer->pdo(), $this->installer->tablePrefix('core_'), $this->clock);
+    }
+
     /** Gestione dei plugin (pagina web Plugin del Core). */
     public function plugins(): PluginManager
     {
@@ -100,7 +109,8 @@ final class Kernel
         try {
             $this->boot();
 
-            return $this->router->dispatch($request);
+            // Ogni richiesta che modifica dati, di qualsiasi modulo, passa la protezione CSRF.
+            return CsrfGuard::check($request) ?? $this->router->dispatch($request);
         } catch (\Throwable $e) {
             error_log('[EMP] ' . $e::class . ': ' . $e->getMessage());
 

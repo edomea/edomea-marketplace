@@ -34,6 +34,10 @@ final class Request
         if (isset($_SERVER['CONTENT_TYPE']) && is_string($_SERVER['CONTENT_TYPE'])) {
             $headers['content-type'] = $_SERVER['CONTENT_TYPE'];
         }
+        unset($headers['x-emp-https']);
+        if (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') {
+            $headers['x-emp-https'] = '1';
+        }
         $path = parse_url((string) ($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
         $body = (string) file_get_contents('php://input', false, null, 0, 65536);
 
@@ -54,6 +58,47 @@ final class Request
     public function param(string $name): string
     {
         return $this->params[$name] ?? '';
+    }
+
+    /** Corpo JSON come array (vuoto se assente o non valido). */
+    public function json(): array
+    {
+        if ($this->body === '') {
+            return [];
+        }
+        try {
+            $data = json_decode($this->body, true, 8, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            return [];
+        }
+
+        return is_array($data) ? $data : [];
+    }
+
+    /** Campo testuale del corpo JSON ('' se assente o non testuale). */
+    public function input(string $name): string
+    {
+        $v = $this->json()[$name] ?? '';
+
+        return is_string($v) ? $v : '';
+    }
+
+    public function cookie(string $name): ?string
+    {
+        foreach (explode(';', (string) $this->header('cookie')) as $pair) {
+            [$k, $v] = array_pad(explode('=', trim($pair), 2), 2, '');
+            if ($k === $name) {
+                return $v;
+            }
+        }
+
+        return null;
+    }
+
+    /** True se la richiesta è arrivata in HTTPS (direttamente o tramite Nginx). */
+    public function isSecure(): bool
+    {
+        return ($this->headers['x-emp-https'] ?? '') === '1';
     }
 
     /** @param array<string, string> $params */

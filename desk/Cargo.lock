@@ -776,7 +776,7 @@ dependencies = [
 
 [[package]]
 name = "emp-desk"
-version = "0.5.0-alpha.2"
+version = "0.5.0-alpha.3"
 dependencies = [
  "emp-core-installer",
  "serde",
@@ -789,7 +789,7 @@ dependencies = [
 
 [[package]]
 name = "emp-server"
-version = "0.5.0-alpha.2"
+version = "0.5.0-alpha.3"
 dependencies = [
  "emp-core-installer",
  "getrandom 0.3.4",

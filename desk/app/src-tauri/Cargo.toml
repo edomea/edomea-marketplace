@@ -1,6 +1,6 @@
 [package]
 name = "emp-desk"
-version = "0.5.0-alpha.2"
+version = "0.5.0-alpha.3"
 description = "EMP Desk — Edomea Marketplace: ambiente Server/Client e installazione del Core"
 edition.workspace = true
 license.workspace = true

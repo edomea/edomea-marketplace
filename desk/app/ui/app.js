@@ -2,9 +2,9 @@
 const invoke = window.__TAURI__.core.invoke;
 const $ = (id) => document.getElementById(id);
 const status = $("status"), report = $("report"), scan = $("scan"), save = $("save");
-const clientBox = $("client-box"), serverUrl = $("server-url"), modulesBox = $("modules-box");
+const clientBox = $("client-box"), serverUrl = $("server-url"), coreBox = $("core-box");
 const planBtn = $("plan"), planTable = $("plan-table"), confirmBox = $("confirm-box");
-const installBtn = $("install"), cancelBtn = $("cancel"), modulesStatus = $("modules-status");
+const installBtn = $("install"), cancelBtn = $("cancel"), coreStatus = $("core-status");
 
 const ACTIONS = { installa: "Installa", aggiorna: "Aggiorna", invariato: "Già installato" };
 
@@ -20,22 +20,19 @@ function selectedMode() {
 
 function applyMode(mode, saved) {
   clientBox.hidden = mode !== "client";
-  // La sezione moduli compare solo quando la modalità Server è salvata.
-  modulesBox.hidden = !(mode === "server" && saved);
+  // La sezione Core compare solo quando la modalità Server è salvata.
+  coreBox.hidden = !(mode === "server" && saved);
 }
 
-function renderPlan(steps) {
+function renderPlan(step) {
   const body = planTable.querySelector("tbody");
   body.replaceChildren();
-  steps.forEach((s, i) => {
-    const tr = document.createElement("tr");
-    if (s.core) tr.className = "core";
-    [String(i + 1), s.name + " (" + s.id + ")", s.version, s.installed_version || "—", ACTIONS[s.action] || s.action]
-      .forEach((text) => { const td = document.createElement("td"); td.textContent = text; tr.appendChild(td); });
-    body.appendChild(tr);
-  });
-  planTable.hidden = steps.length === 0;
-  confirmBox.hidden = !steps.some((s) => s.action !== "invariato");
+  const tr = document.createElement("tr");
+  [step.name, step.version, step.installed_version || "—", ACTIONS[step.action] || step.action]
+    .forEach((text) => { const td = document.createElement("td"); td.textContent = text; tr.appendChild(td); });
+  body.appendChild(tr);
+  planTable.hidden = false;
+  confirmBox.hidden = step.action === "invariato";
 }
 
 async function refresh() {
@@ -69,7 +66,7 @@ save.addEventListener("click", async () => {
     const s = await invoke("save_settings", { mode, serverUrl: mode === "client" ? serverUrl.value : null });
     if (s.server_url) serverUrl.value = s.server_url;
     say(status, mode === "server"
-      ? "Modalità Server salvata. Puoi preparare l'installazione di Core e plugin."
+      ? "Modalità Server salvata. Puoi installare il Core."
       : "Modalità Client salvata. La verifica della connessione TLS al Server arriverà con la Macro 3.");
     applyMode(mode, true);
   } catch (e) {
@@ -82,31 +79,30 @@ save.addEventListener("click", async () => {
 planBtn.addEventListener("click", async () => {
   planBtn.disabled = true;
   confirmBox.hidden = true;
-  say(modulesStatus, "Verifica dei pacchetti in corso...");
+  say(coreStatus, "Verifica del pacchetto in corso...");
   try {
-    const steps = await invoke("module_plan", { selected: null });
-    renderPlan(steps);
-    say(modulesStatus, steps.every((s) => s.action === "invariato") ? "Tutto già installato." : "Pacchetti verificati. Controlla il piano e conferma.");
+    const step = await invoke("core_plan");
+    renderPlan(step);
+    say(coreStatus, step.action === "invariato" ? "Il Core è già installato e aggiornato." : "Pacchetto verificato. Controlla e conferma.");
   } catch (e) {
     planTable.hidden = true;
-    say(modulesStatus, String(e), true);
+    say(coreStatus, String(e), true);
   } finally {
     planBtn.disabled = false;
   }
 });
 
-cancelBtn.addEventListener("click", () => { confirmBox.hidden = true; say(modulesStatus, "Installazione annullata."); });
+cancelBtn.addEventListener("click", () => { confirmBox.hidden = true; say(coreStatus, "Installazione annullata."); });
 
 installBtn.addEventListener("click", async () => {
   installBtn.disabled = true; planBtn.disabled = true;
-  say(modulesStatus, "Installazione in corso...");
+  say(coreStatus, "Installazione del Core in corso...");
   try {
-    const steps = await invoke("module_install", { selected: null });
-    renderPlan(steps.map((s) => ({ ...s, installed_version: s.action === "invariato" ? s.version : s.installed_version })));
-    confirmBox.hidden = true;
-    say(modulesStatus, "File di Core e plugin installati. Il database verrà preparato dal Core quando l'ambiente PHP/MariaDB sarà installato (Macro 2).");
+    const step = await invoke("core_install");
+    renderPlan({ ...step, installed_version: step.version, action: "invariato" });
+    say(coreStatus, "File del Core installati. Il database e la pagina web Plugin saranno disponibili quando l'ambiente PHP/MariaDB/Nginx sarà installato (Macro 2).");
   } catch (e) {
-    say(modulesStatus, "Installazione interrotta: " + String(e), true);
+    say(coreStatus, "Installazione interrotta: " + String(e), true);
   } finally {
     installBtn.disabled = false; planBtn.disabled = false;
   }

@@ -1,14 +1,27 @@
 # EMP — Architettura modulare e installazione
 
-Specifica tecnica per **Edomea Marketplace (EMP)**. Versione 0.1 · 15/11/2026.
+Specifica tecnica per **Edomea Marketplace (EMP)**. Versione 0.2 · 16/11/2026.
 
-Questo documento definisce come si installano il Core e i plugin, sia da **EMP Desk** (installazione locale Server/Client) sia da **EMP Web**. Integra il [manuale tecnico-operativo](manuale-tecnico-operativo.md) e la [mappa di fusione Edomea/VenVia](fusione-edomea-venvia.md).
+Questo documento definisce come si installano il Core e i plugin. Integra il [manuale tecnico-operativo](manuale-tecnico-operativo.md) e la [mappa di fusione Edomea/VenVia](fusione-edomea-venvia.md).
+
+## Chi installa cosa
+
+| Componente | Cartella nel repository | Chi lo installa | Come |
+|---|---|---|---|
+| **EMP Desk** (Server/Client) | `desk/` | L'operatore | Installer Windows (EXE) |
+| **emp-core** (plugin core) | `core/` | **EMP Desk**, in modalità Server | Pacchetto incluso nell'installer |
+| **Plugin dell'ecosistema** | `plugins/<id>/` | **Il Core**, dalla pagina web *Plugin* | Pacchetti del catalogo |
+
+```
+EMP Desk (Server) ──installa──▶ emp-core ──installa dal web──▶ emp-studio, emp-magazzino, emp-pos, …
+EMP Desk (Client) ──usa le API del Server (nessuna installazione di moduli)
+```
 
 ---
 
 ## 1. Principi
 
-1. **Prima il Core, poi i plugin.** Nessun plugin si installa né si avvia se il Core non è installato e compatibile.
+1. **Prima il Core, poi i plugin.** Desk installa solo il Core; i plugin si installano dopo, dall'interfaccia web del Core. Nessun plugin si installa né si avvia se il Core non è installato e compatibile.
 2. **Un solo formato di modulo.** Core e plugin sono entrambi *moduli* descritti dallo stesso manifest `emp-module.json`. Il Core è il modulo `emp-core` di tipo `core`; tutti gli altri sono di tipo `plugin`.
 3. **Ordine deterministico.** L'ordine di installazione e di avvio è calcolato dalle dipendenze dichiarate (ordinamento topologico), con il Core sempre primo. A parità di dipendenze, l'ordine è alfabetico per `id`, quindi è identico su ogni installazione.
 4. **Il Core governa i plugin, non WordPress.** In EMP Web, WordPress ospita il Core ma non installa né attiva i moduli EMP.
@@ -97,27 +110,51 @@ I pacchetti di una distribuzione sono elencati in `emp-packages.json`:
 }
 ```
 
-L'indice è generato dalla CI e pubblicato insieme ai pacchetti nella release GitHub approvata. In una fase successiva l'indice sarà firmato; fino ad allora la sua integrità dipende dal canale (release GitHub su HTTPS o pacchetti inclusi nell'installer).
+Ci sono due indici distinti, generati da `tools/build-packages.php`:
+
+| Indice | Contenuto | Dove si usa |
+|---|---|---|
+| Pacchetto del Core (`build-packages.php core`) | solo `emp-core` | incluso nell'installer EMP Desk |
+| Catalogo plugin (`build-packages.php plugin`) | tutti i plugin sviluppati | cartella `catalog_dir` del Core, allegati della release |
+
+Entrambi sono generati dalla CI e pubblicati nella release GitHub approvata. In una fase successiva l'indice sarà firmato; fino ad allora la sua integrità dipende dal canale (release GitHub su HTTPS, attestazione di provenienza, pacchetto incluso nell'installer).
 
 ---
 
-## 4. Installazione da EMP Desk
+## 4. Installazione del Core da EMP Desk
 
 ### Modalità Server
 
 1. **Preflight**: sistema operativo, architettura, RAM, spazio, porte 80/443/3306, processi e servizi esistenti. Nessuna sovrascrittura di servizi preesistenti.
 2. **Ambiente** (Macro 2): PHP con estensioni, MariaDB e Nginx da pacchetti ufficiali verificati, servizi ad avvio automatico, MariaDB solo su loopback.
-3. **Moduli**: Desk legge `emp-packages.json` (incluso nell'installer o scaricato da una release approvata), verifica ogni SHA-256, calcola il piano di installazione e lo mostra all'operatore:
-   - `emp-core` per primo;
-   - i plugin selezionati, più le loro dipendenze, in ordine topologico;
-   - errore bloccante se una dipendenza manca o è incompatibile, o se due moduli dichiarano lo stesso `table_prefix`.
-4. Estrae ogni pacchetto in `<dati>/modules/<id>/`, rifiutando percorsi assoluti, `..` e collegamenti simbolici; scrive i file in una cartella temporanea e la rinomina solo a estrazione completata.
-5. Chiede al Core di eseguire l'installazione dei moduli (migrazioni) nello stesso ordine.
-6. Registra lo stato in `<dati>/modules/installed.json`.
+3. **Core**: Desk legge l'indice incluso nell'installer, che deve contenere **solo** `emp-core`; verifica lo SHA-256 e mostra all'operatore versione inclusa, versione installata e operazione (installa, aggiorna, invariato). Rifiuta una versione più vecchia o una versione già usata con contenuto diverso.
+4. Estrae il pacchetto in `<dati>/modules/emp-core/`, rifiutando percorsi assoluti, `..` e collegamenti simbolici; scrive i file in una cartella temporanea e li attiva solo a estrazione completata. La versione precedente resta in `modules/.precedenti/`.
+5. Il Core esegue le proprie migrazioni (`php bin/emp installa`; dalla Macro 2 lo farà Desk automaticamente).
+6. Lo stato è registrato in `<dati>/modules/installed.json`.
 
 ### Modalità Client
 
-Il Client **non installa moduli né database**. Configura soltanto l'indirizzo HTTPS del Server, ne verifica l'identità TLS e usa le API del Core. Le funzioni visibili dipendono dai moduli installati sul Server e dai permessi dell'operatore.
+Il Client **non installa moduli né database**. Configura soltanto l'indirizzo HTTPS del Server, ne verifica l'identità TLS (Macro 3) e usa le API del Core. Le funzioni visibili dipendono dai plugin installati sul Server e dai permessi dell'operatore.
+
+---
+
+## 4-bis. Installazione dei plugin dall'interfaccia web del Core
+
+Pagina: `/amministrazione/plugin.html` del Core. API:
+
+| Metodo e percorso | Funzione |
+|---|---|
+| `GET /api/v1/plugin` | Elenco: versione disponibile e installata, dipendenze, stato (installabile, aggiornamento disponibile, installato, non compatibile con il motivo) |
+| `POST /api/v1/plugin/{id}/installa` | Installa o aggiorna il plugin e le sue dipendenze |
+| `POST /api/v1/plugin/{id}/disinstalla` | Rimuove il plugin dal registro; i dati restano |
+
+Installazione di un plugin:
+1. il Core legge il catalogo (`catalog_dir`), verifica lo SHA-256 di ogni pacchetto e ignora un'eventuale voce `emp-core` (il Core si aggiorna solo da Desk);
+2. calcola il piano: dipendenze prima, Core sempre già presente, nessun conflitto di versione o di prefisso tabelle;
+3. estrae i pacchetti mancanti o più recenti con le stesse regole di sicurezza di Desk;
+4. esegue le migrazioni nell'ordine del piano, registrando l'esecutore.
+
+**Accesso provvisorio.** Finché il Core non ha il servizio Accesso (login, ruoli, MFA), queste API rispondono **solo dal computer Server**: indirizzo di loopback, intestazione `Host` locale, e per le modifiche l'intestazione `X-EMP-Richiesta` e un'eventuale `Origin` locale. Le altre postazioni ricevono `403`. Nella tracciabilità l'esecutore è `amministrazione-locale`.
 
 ---
 

@@ -29,20 +29,21 @@
     <p id="status" role="status"></p>
   </section>
 
-  <section id="modules-box" hidden>
-    <h2>2. Core e plugin</h2>
-    <p>Il Core si installa sempre per primo; i plugin seguono nell'ordine delle loro dipendenze. Ogni pacchetto è verificato con la sua impronta SHA-256 prima dell'installazione.</p>
-    <button id="plan">Calcola piano di installazione</button>
+  <section id="core-box" hidden>
+    <h2>2. EMP Core</h2>
+    <p>EMP Desk installa solo il <strong>Core</strong>, incluso in questo installer. Il pacchetto è verificato con la sua impronta SHA-256 prima dell'installazione.</p>
+    <p>Gli altri plugin (cassa, magazzino, Studio, contabilità…) si installano dopo, dalla pagina <strong>Plugin</strong> dell'interfaccia web del Core.</p>
+    <button id="plan">Controlla il Core</button>
     <table id="plan-table" hidden>
-      <thead><tr><th>#</th><th>Modulo</th><th>Versione</th><th>Installata</th><th>Operazione</th></tr></thead>
+      <thead><tr><th>Modulo</th><th>Versione inclusa</th><th>Installata</th><th>Operazione</th></tr></thead>
       <tbody></tbody>
     </table>
     <div id="confirm-box" hidden>
-      <p>Confermi l'installazione dei file nell'ordine indicato? I dati esistenti non vengono cancellati; le versioni sostituite restano conservate.</p>
-      <button id="install">Conferma e installa</button>
+      <p>Confermi? I dati esistenti non vengono cancellati; la versione sostituita resta conservata.</p>
+      <button id="install">Conferma e installa il Core</button>
       <button id="cancel" class="secondary">Annulla</button>
     </div>
-    <p id="modules-status" role="status"></p>
+    <p id="core-status" role="status"></p>
   </section>
 
   <section>
@@ -50,7 +51,7 @@
     <button id="scan">Aggiorna diagnostica</button>
     <pre id="report" aria-live="polite">In attesa...</pre>
   </section>
-  <footer>Ambiente PHP, MariaDB e Nginx: installazione automatica prevista nella Macro 2. Core e plugin sono in PHP.</footer>
+  <footer>Ambiente PHP, MariaDB e Nginx: installazione automatica prevista nella Macro 2. Core e plugin sono in PHP; i plugin si gestiscono dal Core.</footer>
 </main>
 </body>
 </html>

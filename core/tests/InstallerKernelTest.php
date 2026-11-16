@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Emp\Core\Tests;
 
+use Emp\Core\Http\Request;
 use Emp\Core\Kernel;
 use Emp\Core\Module\Installer;
 use Emp\Core\Module\Registry;
@@ -49,13 +50,13 @@ final class InstallerKernelTest extends TestCase
         self::assertSame(['tecnico'], $who);
 
         $kernel = new Kernel($this->modules, $this->installer, new Clock());
-        $health = $kernel->handle('GET', '/api/v1/salute');
+        $health = $kernel->handle(new Request('GET', '/api/v1/salute'));
         self::assertSame(200, $health->status);
         self::assertSame('ok', json_decode($health->body, true)['stato']);
-        $plugin = $kernel->handle('GET', '/api/v1/esempio');
+        $plugin = $kernel->handle(new Request('GET', '/api/v1/esempio'));
         self::assertSame(['modulo' => 'emp-esempio', 'versione' => '0.1.0'], json_decode($plugin->body, true));
-        self::assertSame(404, $kernel->handle('GET', '/api/v1/inesistente')->status);
-        self::assertSame(405, $kernel->handle('POST', '/api/v1/salute')->status);
+        self::assertSame(404, $kernel->handle(new Request('GET', '/api/v1/inesistente'))->status);
+        self::assertSame(405, $kernel->handle(new Request('POST', '/api/v1/salute'))->status);
         self::assertSame(['emp-core', 'emp-esempio'], array_map(static fn ($m) => $m->id, $kernel->modules()));
     }
 
@@ -76,15 +77,15 @@ final class InstallerKernelTest extends TestCase
     public function testKernelRefusesWhenCoreNotInstalled(): void
     {
         $kernel = new Kernel($this->modules, $this->installer, new Clock());
-        self::assertSame(503, $kernel->handle('GET', '/api/v1/salute')->status);
+        self::assertSame(503, $kernel->handle(new Request('GET', '/api/v1/salute'))->status);
     }
 
     public function testOnlyInstalledPluginsBoot(): void
     {
         $this->installer->install($this->plan(['emp-core']), 'tecnico');
         $kernel = new Kernel($this->modules, $this->installer, new Clock());
-        self::assertSame(200, $kernel->handle('GET', '/api/v1/salute')->status);
-        self::assertSame(404, $kernel->handle('GET', '/api/v1/esempio')->status);
+        self::assertSame(200, $kernel->handle(new Request('GET', '/api/v1/salute'))->status);
+        self::assertSame(404, $kernel->handle(new Request('GET', '/api/v1/esempio'))->status);
     }
 
     public function testModifiedMigrationBlocksBoot(): void

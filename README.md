@@ -8,11 +8,19 @@ Il progetto è in fase iniziale di sviluppo: EMP Desk 0.5.0-alpha.1 e Core 0.1.0
 
 ## Componenti
 
-| Componente | Linguaggio | Cartella | Ruolo |
-|---|---|---|---|
-| Edomea Core | PHP | [`core/`](core/) | API, modello dati, autorizzazioni, transazioni, moduli |
-| Edomea Desk | Rust | [`desk/`](desk/) | App nativa Windows/macOS/Linux, modalità Server e Client |
-| Moduli e plugin | PHP | [`plugins/`](plugins/) | Studio, cassa, logistica, integrazione Web/WooCommerce |
+Il repository è diviso in tre parti, con compiti separati:
+
+| Parte | Cartella | Linguaggio | Cosa fa | Chi la installa |
+|---|---|---|---|---|
+| **EMP Desk** | [`desk/`](desk/) | Rust (Tauri) | App per Windows (poi macOS e Linux): prepara il computer come **Server** del negozio o come postazione **Client** | L'operatore, con l'installer |
+| **EMP Core** | [`core/`](core/) | PHP | Il plugin core: API, dati, tracciabilità, gestione degli altri plugin | EMP Desk, in modalità Server |
+| **Plugin dell'ecosistema** | [`plugins/`](plugins/) | PHP | Catalogo, magazzino, cassa, scontrini, contabilità, assistenza… ([elenco](plugins/README.md)) | Il Core, dalla sua pagina web **Plugin** |
+
+```
+EMP Desk ──▶ installa EMP Core ──▶ dalla pagina web Plugin del Core si installano gli altri plugin
+```
+
+Altre cartelle: [`docs/`](docs/) documentazione, [`tools/`](tools/) script per costruire i pacchetti, [`.github/`](.github/) automazioni di verifica e rilascio.
 
 ## Documentazione
 

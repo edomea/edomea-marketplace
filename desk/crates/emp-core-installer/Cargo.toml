@@ -1,7 +1,7 @@
 [package]
-name = "emp-modules"
+name = "emp-core-installer"
 version = "0.1.0"
-description = "EMP Desk: verifica pacchetti, ordine di installazione Core → plugin, estrazione sicura"
+description = "EMP Desk: verifica e installazione del pacchetto del Core (emp-core)"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

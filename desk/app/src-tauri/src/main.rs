@@ -1,9 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! EMP Desk — Edomea Marketplace.
-//! Deriva da VenVia Desk 0.4 Alpha 4: diagnostica e modalità Server/Client,
-//! più il motore di installazione dei moduli (Core per primo, poi i plugin).
+//! Deriva da VenVia Desk 0.4 Alpha 4: diagnostica e modalità Server/Client.
+//! In modalità Server installa e aggiorna il plugin **emp-core**, incluso
+//! nell'installer. Tutti gli altri plugin si installano dall'interfaccia web
+//! del Core (pagina Plugin), non da Desk.
 
-use emp_modules::PlanStep;
+use emp_core_installer::CoreStep;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -119,55 +121,41 @@ fn save_settings(app: tauri::AppHandle, mode: String, server_url: Option<String>
     Ok(s)
 }
 
-/// Pacchetti inclusi nell'installer (risorsa "pacchetti/").
+/// Pacchetto del Core incluso nell'installer (risorsa "pacchetti/").
 fn packages_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().resource_dir().map_err(|e| e.to_string())?.join("pacchetti"))
 }
 
 /// Cartella dei moduli installati: dati dell'applicazione, fuori dalla cartella del programma.
+/// Desk vi scrive solo emp-core; i plugin vi sono aggiunti dal Core.
 fn modules_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(app.path().app_data_dir().map_err(|e| e.to_string())?.join("modules"))
 }
 
 fn require_server(app: &tauri::AppHandle) -> Result<(), String> {
     if read_settings(app)?.mode != "server" {
-        return Err("Core e plugin si installano solo sul computer configurato come Server. I Client usano le API del Server.".into());
+        return Err("Il Core si installa solo sul computer configurato come Server. I Client usano le API del Server.".into());
     }
     Ok(())
 }
 
-fn clean_selection(selected: Option<Vec<String>>) -> Result<Option<Vec<String>>, String> {
-    match selected {
-        None => Ok(None),
-        Some(ids) => {
-            if ids.len() > 200 || ids.iter().any(|id| !emp_modules::manifest::valid_id(id)) {
-                return Err("Selezione dei moduli non valida".into());
-            }
-            Ok(Some(ids))
-        }
-    }
-}
-
-/// Mostra il piano di installazione senza modificare nulla.
+/// Confronta il Core incluso nell'installer con quello installato, senza modificare nulla.
 #[tauri::command]
-async fn module_plan(app: tauri::AppHandle, selected: Option<Vec<String>>) -> Result<Vec<PlanStep>, String> {
+async fn core_plan(app: tauri::AppHandle) -> Result<CoreStep, String> {
     require_server(&app)?;
-    let selected = clean_selection(selected)?;
     let (pk, md) = (packages_dir(&app)?, modules_dir(&app)?);
-    tauri::async_runtime::spawn_blocking(move || emp_modules::plan(&pk, &md, selected.as_deref()))
+    tauri::async_runtime::spawn_blocking(move || emp_core_installer::core_plan(&pk, &md))
         .await
         .map_err(|e| e.to_string())?
 }
 
-/// Installa i file di Core e plugin nell'ordine del piano. Le migrazioni del
-/// database saranno eseguite dal Core quando l'ambiente PHP/MariaDB sarà
-/// predisposto da Desk (Macro 2).
+/// Installa o aggiorna i file del Core. Le migrazioni del database saranno
+/// eseguite dal Core quando l'ambiente PHP/MariaDB sarà predisposto da Desk (Macro 2).
 #[tauri::command]
-async fn module_install(app: tauri::AppHandle, selected: Option<Vec<String>>) -> Result<Vec<PlanStep>, String> {
+async fn core_install(app: tauri::AppHandle) -> Result<CoreStep, String> {
     require_server(&app)?;
-    let selected = clean_selection(selected)?;
     let (pk, md) = (packages_dir(&app)?, modules_dir(&app)?);
-    tauri::async_runtime::spawn_blocking(move || emp_modules::install(&pk, &md, selected.as_deref()))
+    tauri::async_runtime::spawn_blocking(move || emp_core_installer::install_core(&pk, &md))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -230,7 +218,7 @@ async fn diagnostics() -> Result<Report, String> {
 
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![diagnostics, load_settings, save_settings, module_plan, module_install])
+        .invoke_handler(tauri::generate_handler![diagnostics, load_settings, save_settings, core_plan, core_install])
         .run(tauri::generate_context!())
         .expect("Avvio EMP Desk non riuscito");
 }
@@ -254,12 +242,5 @@ mod tests {
         for bad in ["http://emp.lan", "https://", "https://user:pw@emp.lan", "https://emp.lan/percorso", "https://emp.lan:0", "https://emp.lan:99999", "https://-emp.lan", "ftp://emp.lan"] {
             assert!(valid_server_url(bad).is_err(), "{bad}");
         }
-    }
-
-    #[test]
-    fn selection() {
-        assert!(clean_selection(None).unwrap().is_none());
-        assert!(clean_selection(Some(vec!["emp-pos".into()])).is_ok());
-        assert!(clean_selection(Some(vec!["../x".into()])).is_err());
     }
 }

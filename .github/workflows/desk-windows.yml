@@ -48,12 +48,12 @@ jobs:
           # Cargo.lock è versionato: la build usa esattamente le dipendenze revisionate.
           cargo metadata --locked --format-version 1 > $null
           if ($LASTEXITCODE -ne 0) { throw 'Cargo.lock missing or out of date' }
-      - name: Build module packages (Core + plugins)
+      - name: Build Core package (Desk installs only emp-core)
         shell: pwsh
         run: |
           php -v
           if ($LASTEXITCODE -ne 0) { throw 'PHP not available on runner' }
-          php ../../../tools/build-packages.php pacchetti
+          php ../../../tools/build-packages.php core pacchetti
           if ($LASTEXITCODE -ne 0) { throw 'Package build failed' }
       - name: Audit Rust dependencies
         shell: pwsh

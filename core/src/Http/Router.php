@@ -5,16 +5,16 @@ declare(strict_types=1);
 namespace Emp\Core\Http;
 
 /**
- * Router minimo delle API del Core. Ogni rotta appartiene al modulo che l'ha
+ * Router delle API del Core. Ogni rotta appartiene al modulo che l'ha
  * registrata; due moduli non possono registrare la stessa rotta.
  * I percorsi sono tutti sotto /api/v1/.
  */
 final class Router
 {
-    /** @var array<string, array<string, array{string, \Closure(array<string, string>): Response}>> */
+    /** @var array<string, array<string, array{string, \Closure(Request): Response}>> */
     private array $routes = [];
 
-    /** @param \Closure(array<string, string>): Response $handler riceve i parametri del percorso */
+    /** @param \Closure(Request): Response $handler */
     public function add(string $method, string $path, string $moduleId, \Closure $handler): void
     {
         $method = strtoupper($method);
@@ -30,10 +30,9 @@ final class Router
         $this->routes[$method][$path] = [$moduleId, $handler];
     }
 
-    public function dispatch(string $method, string $uriPath): Response
+    public function dispatch(Request $request): Response
     {
-        $method = strtoupper($method);
-        $path = rtrim($uriPath, '/') ?: '/';
+        $path = rtrim($request->path, '/') ?: '/';
         $methodAllowed = false;
         foreach ($this->routes as $m => $routes) {
             foreach ($routes as $pattern => [, $handler]) {
@@ -41,8 +40,8 @@ final class Router
                 if ($params === null) {
                     continue;
                 }
-                if ($m === $method) {
-                    return $handler($params);
+                if ($m === $request->method) {
+                    return $handler($request->withParams($params));
                 }
                 $methodAllowed = true;
             }

@@ -5,11 +5,13 @@ declare(strict_types=1);
 /*
  * Costruisce i pacchetti dei moduli EMP e l'indice emp-packages.json.
  *
- *   php tools/build-packages.php <cartella-destinazione>
+ *   php tools/build-packages.php core   <cartella>               pacchetto del Core, per l'installer EMP Desk
+ *   php tools/build-packages.php plugin <cartella> [--con-esempi] catalogo dei plugin, per la pagina web del Core
  *
  * - Core: core/ → emp-core-<versione>.zip con la cartella emp-core/ alla radice
- *   (esclusi test, vendor e file di sviluppo).
- * - Plugin: plugins/<id>/ → <id>-<versione>.zip, se contiene emp-module.json.
+ *   (esclusi test, vendor e file di sviluppo). Lo installa solo EMP Desk.
+ * - Plugin: plugins/<id>/ → <id>-<versione>.zip, se contiene emp-module.json
+ *   (le cartelle con solo il README sono plugin previsti, non ancora sviluppati).
  *   I plugin dimostrativi (emp-esempio) sono inclusi solo con --con-esempi.
  * - Archivi riproducibili: voci ordinate e data fissa, così la stessa sorgente
  *   produce la stessa impronta SHA-256.
@@ -22,12 +24,12 @@ if (PHP_SAPI !== 'cli' || !class_exists(ZipArchive::class)) {
 $args = array_slice($argv, 1);
 $withExamples = in_array('--con-esempi', $args, true);
 $args = array_values(array_filter($args, static fn (string $a): bool => $a !== '--con-esempi'));
-if (count($args) !== 1) {
-    fwrite(STDERR, "Uso: php tools/build-packages.php [--con-esempi] <cartella-destinazione>\n");
+if (count($args) !== 2 || !in_array($args[0], ['core', 'plugin'], true)) {
+    fwrite(STDERR, "Uso: php tools/build-packages.php core|plugin <cartella-destinazione> [--con-esempi]\n");
     exit(2);
 }
 $root = dirname(__DIR__);
-$out = $args[0];
+[$kind, $out] = $args;
 if (!is_dir($out) && !mkdir($out, 0755, true)) {
     fwrite(STDERR, "Impossibile creare {$out}\n");
     exit(1);
@@ -97,13 +99,17 @@ function package(string $dir, string $out): array
 }
 
 try {
-    $packages = [package($root . '/core', $out)];
-    foreach (glob($root . '/plugins/*/emp-module.json') ?: [] as $manifest) {
-        $dir = dirname($manifest);
-        if (!$withExamples && basename($dir) === 'emp-esempio') {
-            continue;
+    $packages = [];
+    if ($kind === 'core') {
+        $packages[] = package($root . '/core', $out);
+    } else {
+        foreach (glob($root . '/plugins/*/emp-module.json') ?: [] as $manifest) {
+            $dir = dirname($manifest);
+            if (!$withExamples && basename($dir) === 'emp-esempio') {
+                continue;
+            }
+            $packages[] = package($dir, $out);
         }
-        $packages[] = package($dir, $out);
     }
     usort($packages, static fn (array $a, array $b): int => strcmp($a['id'], $b['id']));
     file_put_contents(

@@ -1,6 +1,7 @@
-//! Lettura del manifest emp-module.json lato Desk. Desk usa solo i campi che
-//! servono a pianificare l'installazione; la validazione completa (classi,
-//! autoload, migrazioni) resta al Core PHP prima dell'avvio.
+//! Lettura del manifest emp-module.json lato Desk. Desk installa solo il Core,
+//! quindi usa solo i campi che servono a identificarlo e a confrontare le
+//! versioni; la validazione completa (classi, autoload, migrazioni) resta al
+//! Core PHP prima dell'avvio.
 
 use crate::version::{Constraint, Version};
 use serde::Deserialize;
@@ -98,5 +99,26 @@ impl Manifest {
             requires,
             table_prefix: raw.table_prefix,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rules() {
+        let ok = r#"{"schema":1,"id":"emp-core","name":"EMP Core","version":"0.1.0","type":"core","php":">=8.2.0"}"#;
+        assert!(Manifest::from_json(ok.as_bytes()).unwrap().is_core);
+        let bad = [
+            r#"{"schema":1,"id":"emp-pos","name":"x","version":"0.1.0","type":"plugin","php":">=8.2.0"}"#,
+            r#"{"schema":1,"id":"emp-pos","name":"x","version":"0.1.0","type":"core","php":">=8.2.0"}"#,
+            r#"{"schema":2,"id":"emp-core","name":"x","version":"0.1.0","type":"core","php":">=8.2.0"}"#,
+            r#"{"schema":1,"id":"Emp","name":"x","version":"0.1.0","type":"core","php":">=8.2.0"}"#,
+            r#"{"schema":1,"id":"emp-core","name":"x","version":"0.1.0","type":"core","php":">=8.2.0","requires":{"emp-pos":">=0.1.0"}}"#,
+        ];
+        for b in bad {
+            assert!(Manifest::from_json(b.as_bytes()).is_err(), "{b}");
+        }
     }
 }

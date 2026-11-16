@@ -2,10 +2,24 @@
 
 Applicazione nativa per Windows (priorità), macOS e Linux, scritta in **Rust** con **Tauri 2**. Deriva da VenVia Desk 0.4 Alpha 4.
 
+## Compito di Desk
+
+Desk prepara il computer e **installa solo il Core** (`emp-core`):
+
+| Modalità | Cosa fa |
+|---|---|
+| **Server** | Diagnostica, ambiente PHP/MariaDB/Nginx (Macro 2), installazione e aggiornamento del Core incluso nell'installer |
+| **Client** | Salva l'indirizzo `https://` del Server e usa le sue API. Non installa database né moduli |
+
+Tutti gli altri plugin si installano **dalla pagina web Plugin del Core**, non da Desk ([architettura](../docs/architettura-moduli.md)).
+
+## Struttura
+
 | Cartella | Contenuto |
 |---|---|
-| `crates/emp-modules/` | Motore di installazione: verifica SHA-256 dei pacchetti, ordine Core → plugin, estrazione sicura, stato `installed.json` |
-| `app/src-tauri/` | Applicazione desktop: diagnostica, modalità Server/Client, piano e installazione dei moduli |
+| `crates/emp-core-installer/` | Verifica SHA-256 del pacchetto del Core, estrazione sicura (niente `..`, percorsi assoluti, collegamenti simbolici), versione precedente conservata in `modules/.precedenti/`, stato in `installed.json` |
+| `app/src-tauri/` | Applicazione desktop: diagnostica, modalità Server/Client, controllo e installazione del Core |
+| `app/src-tauri/pacchetti/` | Pacchetto del Core incluso nell'installer (generato dalla CI) |
 | `app/ui/` | Interfaccia (HTML/CSS/JS locali, nessuna risorsa remota) |
 
 ## Stato (0.5.0-alpha.1)
@@ -13,10 +27,10 @@ Applicazione nativa per Windows (priorità), macOS e Linux, scritta in **Rust** 
 Funziona:
 - diagnostica del computer (sistema, CPU, RAM, dischi, porte 80/443/3306, processi runtime);
 - modalità **Server** o **Client** salvata in modo persistente; il Client accetta solo un indirizzo `https://` del Server;
-- in modalità Server: piano di installazione dei pacchetti inclusi nell'installer e installazione dei file, **Core per primo**, poi i plugin in ordine di dipendenza; le versioni sostituite restano in `modules/.precedenti/`.
+- in modalità Server: controllo e installazione del Core incluso nell'installer.
 
 Non ancora presente (vedi roadmap del manuale):
-- installazione automatica di PHP, MariaDB e Nginx e dei servizi (Macro 2): fino ad allora le migrazioni del database si eseguono con `php bin/emp installa`;
+- installazione automatica di PHP, MariaDB e Nginx e dei servizi (Macro 2): fino ad allora le migrazioni del Core si eseguono con `php bin/emp installa`;
 - DNS locale, certificati HTTPS e verifica TLS del Client (Macro 3);
 - firma Authenticode dell'installer.
 

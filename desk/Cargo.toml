@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/emp-modules", "app/src-tauri"]
+members = ["crates/emp-core-installer", "app/src-tauri"]
 
 [workspace.package]
 edition = "2021"

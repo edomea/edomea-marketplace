@@ -66,18 +66,31 @@ jobs:
       - uses: actions/checkout@v4
       - name: Rust
         run: rustup default stable
-      - name: Pacchetti → installazione Desk → migrazioni Core → API
+      - name: Desk installa il Core → il Core installa un plugin dal web
         run: |
           set -euo pipefail
           W="$RUNNER_TEMP/e2e"
-          php tools/build-packages.php --con-esempi "$W/pacchetti"
-          cargo run --locked -q --manifest-path desk/Cargo.toml -p emp-modules --example emp-install -- "$W/pacchetti" "$W/modules"
-          printf "<?php return ['dsn' => 'sqlite:%s/emp.db', 'modules_dir' => '%s/modules'];\n" "$W" "$W" > "$W/config.php"
+          B=http://127.0.0.1:8765
+          # 1. Pacchetto del Core (per Desk) e catalogo dei plugin (per il Core).
+          php tools/build-packages.php core "$W/pacchetti-core"
+          php tools/build-packages.php plugin "$W/catalogo" --con-esempi
+          # 2. EMP Desk installa solo il Core.
+          cargo run --locked -q --manifest-path desk/Cargo.toml -p emp-core-installer --example emp-install -- "$W/pacchetti-core" "$W/modules"
+          test ! -d "$W/modules/emp-esempio"
+          # 3. Il Core prepara il database.
+          printf "<?php return ['dsn' => 'sqlite:%s/emp.db', 'modules_dir' => '%s/modules', 'catalog_dir' => '%s/catalogo'];\n" "$W" "$W" "$W" > "$W/config.php"
           export EMP_CONFIG="$W/config.php"
           php "$W/modules/emp-core/bin/emp" installa --utente=ci
           php -S 127.0.0.1:8765 -t "$W/modules/emp-core/public" "$W/modules/emp-core/public/index.php" > "$W/server.log" 2>&1 &
           sleep 2
-          curl -fsS http://127.0.0.1:8765/api/v1/salute | tee /dev/stderr | grep -q '"stato":"ok"'
-          curl -fsS http://127.0.0.1:8765/api/v1/esempio | grep -q '"modulo":"emp-esempio"'
-          # Seconda installazione: nulla da fare.
-          cargo run --locked -q --manifest-path desk/Cargo.toml -p emp-modules --example emp-install -- "$W/pacchetti" "$W/modules" | grep -c invariato | grep -q 2
+          curl -fsS $B/api/v1/salute | tee /dev/stderr | grep -q '"stato":"ok"'
+          curl -fsS -o /dev/null $B/amministrazione/plugin.html
+          # 4. Pagina Plugin: elenco, protezioni, installazione.
+          curl -fsS $B/api/v1/plugin | tee /dev/stderr | grep -q '"stato":"installabile"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST $B/api/v1/plugin/emp-esempio/installa)" = 403
+          test "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: evil.example' $B/api/v1/plugin)" = 403
+          curl -fsS -X POST -H 'X-EMP-Richiesta: 1' $B/api/v1/plugin/emp-esempio/installa | tee /dev/stderr | grep -q '"ok":true'
+          curl -fsS $B/api/v1/esempio | grep -q '"modulo":"emp-esempio"'
+          # 5. Desk rieseguito: Core invariato, plugin intatto.
+          cargo run --locked -q --manifest-path desk/Cargo.toml -p emp-core-installer --example emp-install -- "$W/pacchetti-core" "$W/modules" | grep -q '^invariato emp-core'
+          test -f "$W/modules/emp-esempio/emp-module.json"

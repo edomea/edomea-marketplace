@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
+<title>Plugin — EMP</title>
+<link rel="stylesheet" href="stile.css">
+<script defer src="plugin.js"></script>
+</head>
+<body>
+<header class="emp-header">
+  <strong>EMP — Plugin</strong>
+  <span id="core-version">Core —</span>
+</header>
+<main>
+  <p class="intro">
+    Da questa pagina si installano i plugin dell'ecosistema EMP. Il Core li installa nell'ordine delle dipendenze;
+    i pacchetti provengono dal catalogo configurato e sono verificati con la loro impronta SHA-256.
+  </p>
+  <p class="note">Gestione disponibile solo dal computer Server, finché non sarà attivo il servizio Accesso (login e permessi).</p>
+
+  <div id="errors" class="box err" hidden></div>
+  <div id="no-catalog" class="box" hidden>
+    Nessun catalogo configurato: indicare <code>catalog_dir</code> nella configurazione del Core e copiarvi
+    <code>emp-packages.json</code> con i pacchetti dei plugin.
+  </div>
+
+  <table id="plugins">
+    <thead>
+      <tr><th>Plugin</th><th>Disponibile</th><th>Installata</th><th>Dipendenze</th><th>Stato</th><th></th></tr>
+    </thead>
+    <tbody><tr><td colspan="6">Caricamento...</td></tr></tbody>
+  </table>
+</main>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

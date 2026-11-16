@@ -14,7 +14,8 @@ use Emp\Core\Support\Clock;
  *
  * Il file restituisce un array PHP:
  *   ['dsn' => 'mysql:unix_socket=…;dbname=emp', 'user' => …, 'password' => …,
- *    'prefix' => 'emp_', 'timezone' => 'Europe/Rome', 'modules_dir' => '/…/modules']
+ *    'prefix' => 'emp_', 'timezone' => 'Europe/Rome', 'modules_dir' => '/…/modules',
+ *    'catalog_dir' => '/…/catalogo']  // facoltativo: pacchetti dei plugin installabili dal web
  */
 final class Config
 {
@@ -69,6 +70,13 @@ final class Config
 
     public function kernel(): Kernel
     {
-        return new Kernel($this->modulesDir(), $this->installer(), $this->clock());
+        $catalog = $this->values['catalog_dir'] ?? null;
+
+        return new Kernel(
+            $this->modulesDir(),
+            $this->installer(),
+            $this->clock(),
+            is_string($catalog) && $catalog !== '' ? $catalog : null,
+        );
     }
 }

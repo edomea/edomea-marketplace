@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Emp\Core;
 
+use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
 use Emp\Core\Http\Router;
 use Emp\Core\Module\Installer;
@@ -13,6 +14,8 @@ use Emp\Core\Module\Psr4Autoloader;
 use Emp\Core\Module\Registry;
 use Emp\Core\Module\ResolutionException;
 use Emp\Core\Module\Resolver;
+use Emp\Core\Plugin\Catalog;
+use Emp\Core\Plugin\PluginManager;
 use Emp\Core\Support\Clock;
 
 /**
@@ -30,6 +33,7 @@ final class Kernel
         private readonly string $modulesDir,
         private readonly Installer $installer,
         public readonly Clock $clock,
+        private readonly ?string $catalogDir = null,
     ) {
         $this->router = new Router();
         $this->autoloader = new Psr4Autoloader();
@@ -85,12 +89,18 @@ final class Kernel
         return $this->booted;
     }
 
-    public function handle(string $method, string $path): Response
+    /** Gestione dei plugin (pagina web Plugin del Core). */
+    public function plugins(): PluginManager
+    {
+        return new PluginManager($this->modulesDir, new Catalog($this->catalogDir), $this->installer);
+    }
+
+    public function handle(Request $request): Response
     {
         try {
             $this->boot();
 
-            return $this->router->dispatch($method, $path);
+            return $this->router->dispatch($request);
         } catch (\Throwable $e) {
             error_log('[EMP] ' . $e::class . ': ' . $e->getMessage());
 

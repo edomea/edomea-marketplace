@@ -22,9 +22,10 @@ EMP (Edomea Marketplace) nasce dall'unione di due linee di lavoro:
 
 1. **Il nome è EMP / Edomea Marketplace.** I nomi VenVia restano solo nello storico.
 2. **WordPress non è un prerequisito del server locale.** Il Core gira su PHP + MariaDB + Nginx installati da Desk. WordPress/WooCommerce restano il canale web facoltativo (EMP Web). Questo chiude il "punto da riconciliare" dell'handover VenVia (§2).
-3. **I plugin Edomea diventano moduli EMP**, uno alla volta, sopra il Core. Finché un modulo EMP non è collaudato, il plugin Edomea corrispondente resta in uso: nessuna sostituzione forzata.
-4. **I servizi trasversali passano nel Core**: autorizzazione, tracciabilità (audit), orologio locale, anagrafica clienti condivisa, generatore EAN, registro migrazioni.
-5. **Negozio Zero (Cirò Marina)** è la prima installazione: priorità P0 dell'handover (login/ruoli, Studio, giacenze, POS, acquisti, clienti, documenti).
+3. **EMP Desk installa solo il Core**; tutti gli altri plugin si installano dall'interfaccia web del Core (pagina *Plugin*). Desk resta l'installatore dell'ambiente, il Core governa l'ecosistema dei plugin.
+4. **I plugin Edomea diventano moduli EMP**, uno alla volta, sopra il Core. Finché un modulo EMP non è collaudato, il plugin Edomea corrispondente resta in uso: nessuna sostituzione forzata.
+5. **I servizi trasversali passano nel Core**: autorizzazione, tracciabilità (audit), orologio locale, anagrafica clienti condivisa, generatore EAN, registro migrazioni.
+6. **Negozio Zero (Cirò Marina)** è la prima installazione: priorità P0 dell'handover (login/ruoli, Studio, giacenze, POS, acquisti, clienti, documenti).
 
 ## Mappa plugin Edomea → moduli EMP
 
@@ -41,6 +42,12 @@ EMP (Edomea Marketplace) nasce dall'unione di due linee di lavoro:
 | edomea-stat | emp-statistiche | |
 | edomea-fidelity | emp-fidelity | |
 | edomea-cartelli, edomea-dymo | emp-cartelli | Cartellini prezzo ed etichette |
-| edomea-eurocom, DayaBridge, edomea-espo, Amazon Combo | emp-fornitori-* | Un modulo per fornitore, alimentano il magazzino solo tramite movimenti di carico via API |
+| edomea-eurocom | emp-fornitori-eurocom | Alimenta il magazzino solo tramite movimenti di carico via API |
+| DayaBridge | emp-fornitori-dayabridge | Come sopra |
+| edomea-espo | emp-fornitori-espo | Come sopra |
+| edomea-amazon-combo | emp-amazon | Con estensione browser |
+| — (nuovo) | emp-woocommerce | Canale web EMP Web |
+
+Ogni plugin ha la propria cartella con un README descrittivo in [`plugins/`](../plugins/README.md).
 
 L'ordine di porting verrà deciso modulo per modulo; ogni porting è una pull request separata da approvare.

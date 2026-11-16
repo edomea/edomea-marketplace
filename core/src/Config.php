@@ -10,7 +10,7 @@ use Emp\Core\Support\Clock;
 /**
  * Configurazione dell'installazione. Il file sta fuori dalla cartella pubblica
  * e fuori da Git; il percorso arriva dalla variabile d'ambiente EMP_CONFIG,
- * impostata da EMP Desk (Server) o dall'amministratore (Web).
+ * impostata da EMP Server (PHP-FPM, /etc/emp/config.php) o dall'amministratore (Web).
  *
  * Il file restituisce un array PHP:
  *   ['dsn' => 'mysql:unix_socket=…;dbname=emp', 'user' => …, 'password' => …,

@@ -1,5 +1,0 @@
-Cartella di PHP per Windows incluso nell'installer di EMP Desk (modalità laboratorio).
-La CI vi scarica la build ufficiale da windows.php.net, ne verifica lo SHA-256
-e aggiunge php.ini con le estensioni necessarie (pdo_sqlite, mbstring, zip).
-In sviluppo può restare vuota: con una build di debug si può usare un PHP
-del sistema indicandolo nella variabile EMP_PHP.

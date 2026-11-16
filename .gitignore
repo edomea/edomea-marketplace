@@ -1,12 +1,11 @@
-# Rust (Edomea Desk)
-/desk/target/
-**/*.rs.bk
-
 # PHP (Edomea Core e plugin)
 /vendor/
 **/vendor/
 composer.phar
 .phpunit.result.cache
+
+# Pacchetti generati (tools/build-server.sh, tools/build-packages.php)
+/dist/
 
 # Configurazioni locali e segreti: mai nel repository
 .env
@@ -20,20 +19,3 @@ composer.phar
 Thumbs.db
 .idea/
 .vscode/
-
-# EMP Desk: icone e pacchetti generati in build
-/desk/target/
-/desk/app/src-tauri/icons/
-/desk/app/src-tauri/pacchetti/*
-!/desk/app/src-tauri/pacchetti/LEGGIMI.txt
-/desk/app/src-tauri/dist/
-/desk/app/src-tauri/gen/
-/desk/app/src-tauri/php/*
-!/desk/app/src-tauri/php/LEGGIMI.txt
-/desk/app/src-tauri/mariadb/*
-!/desk/app/src-tauri/mariadb/LEGGIMI.txt
-/desk/app/src-tauri/caddy/*
-!/desk/app/src-tauri/caddy/LEGGIMI.txt
-/desk/app/src-tauri/servizi/*
-!/desk/app/src-tauri/servizi/LEGGIMI.txt
-/desk/app/src-tauri/runtime-manifest.json

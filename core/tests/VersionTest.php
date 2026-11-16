@@ -12,7 +12,7 @@ use PHPUnit\Framework\TestCase;
 
 final class VersionTest extends TestCase
 {
-    /** Casi condivisi con desk/crates/emp-modules (stessi risultati in Rust). */
+    /** Regole delle versioni e dei vincoli (semver con pre-release). */
     public static function comparisons(): array
     {
         return [

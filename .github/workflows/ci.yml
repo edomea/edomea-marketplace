@@ -1,4 +1,4 @@
-name: EMP CI (Linux)
+name: EMP CI
 on:
   pull_request:
   push:
@@ -8,7 +8,13 @@ permissions:
   contents: read
 jobs:
   core-php:
-    runs-on: ubuntu-24.04
+    name: Core PHP (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # PHP di Ubuntu 24.04 (8.3) e 26.04 (8.5), le versioni che il Server userà.
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     defaults:
       run:
@@ -26,79 +32,113 @@ jobs:
       - name: Test Core
         run: vendor/bin/phpunit
 
-  desk-rust:
+  script-server:
+    name: Script del Server (shellcheck)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    defaults:
-      run:
-        working-directory: desk
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Librerie di sistema per Tauri
+      - run: shellcheck -x server/installa.sh server/emp-server server/disinstalla.sh tools/build-server.sh
+      - name: Pacchetto riproducibile
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libsoup-3.0-dev libjavascriptcoregtk-4.1-dev
-      - name: Rust
-        run: rustup default stable && rustup component add clippy
-      - name: Icona provvisoria
-        run: |
-          mkdir -p app/src-tauri/icons
-          python3 - <<'PY'
-          import struct, zlib
-          w = h = 32
-          raw = b''.join(b'\x00' + bytes([30, 58, 95, 255]) * w for _ in range(h))
-          def chunk(t, d): return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
-          png = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)) + chunk(b'IDAT', zlib.compress(raw)) + chunk(b'IEND', b'')
-          ico = struct.pack('<HHH', 0, 1, 1) + struct.pack('<BBBBHHII', w, h, 0, 0, 1, 32, len(png), 22) + png
-          open('app/src-tauri/icons/icon.ico', 'wb').write(ico)
-          open('app/src-tauri/icons/icon.png', 'wb').write(png)
-          PY
-      - name: Clippy (warning bloccanti)
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
-      - name: Test (compreso l'avvio reale del Core con PHP)
-        run: |
-          php ../tools/build-packages.php core "$RUNNER_TEMP/pacchetti-core"
-          EMP_TEST_CORE_PACKAGES="$RUNNER_TEMP/pacchetti-core" EMP_TEST_PHP="$(command -v php)" cargo test --locked --workspace
+          set -euo pipefail
+          tools/build-server.sh "$RUNNER_TEMP/a" --con-esempi > "$RUNNER_TEMP/a.txt"
+          tools/build-server.sh "$RUNNER_TEMP/b" --con-esempi > "$RUNNER_TEMP/b.txt"
+          diff "$RUNNER_TEMP/a.txt" "$RUNNER_TEMP/b.txt"
+          cat "$RUNNER_TEMP/a.txt"
 
-  end-to-end:
-    needs: [core-php, desk-rust]
-    runs-on: ubuntu-24.04
+  server-ubuntu:
+    name: Installazione reale su ${{ matrix.os }}
+    needs: [core-php, script-server]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - name: Rust
-        run: rustup default stable
-      - name: Desk installa il Core → il Core installa un plugin dal web
+      - name: Pulizia dell'immagine del runner
+        run: |
+          # Le immagini di GitHub contengono MySQL e servizi web: sul Server non ci sono.
+          sudo systemctl stop mysql nginx apache2 2>/dev/null || true
+          sudo DEBIAN_FRONTEND=noninteractive apt-get purge -y -q 'mysql-server*' 'mysql-client*' 'mysql-common' 2>/dev/null || true
+          sudo rm -rf /etc/mysql /var/lib/mysql
+      - name: Pacchetto EMP Server (con il plugin dimostrativo nel catalogo)
+        run: |
+          tools/build-server.sh "$RUNNER_TEMP/dist" --con-esempi
+          mkdir -p "$RUNNER_TEMP/inst" && tar -xzf "$RUNNER_TEMP"/dist/emp-server-*.tar.gz -C "$RUNNER_TEMP/inst"
+      - name: Prima installazione
+        run: |
+          cd "$RUNNER_TEMP"/inst/emp-server-*
+          sudo ./installa.sh | tee "$RUNNER_TEMP/installa-1.log"
+      - name: Prova completa dalla rete (HTTPS, certificato verificato)
         run: |
           set -euo pipefail
-          W="$RUNNER_TEMP/e2e"
-          B=http://127.0.0.1:8765
-          # 1. Pacchetto del Core (per Desk) e catalogo dei plugin (per il Core).
-          php tools/build-packages.php core "$W/pacchetti-core"
-          php tools/build-packages.php plugin "$W/catalogo" --con-esempi
-          # 2. EMP Desk installa solo il Core.
-          cargo run --locked -q --manifest-path desk/Cargo.toml -p emp-core-installer --example emp-install -- "$W/pacchetti-core" "$W/modules"
-          test ! -d "$W/modules/emp-esempio"
-          # 3. Il Core prepara il database.
-          printf "<?php return ['dsn' => 'sqlite:%s/emp.db', 'modules_dir' => '%s/modules', 'catalog_dir' => '%s/catalogo'];\n" "$W" "$W" "$W" > "$W/config.php"
-          export EMP_CONFIG="$W/config.php"
-          php "$W/modules/emp-core/bin/emp" installa --utente=ci
-          php -S 127.0.0.1:8765 -t "$W/modules/emp-core/public" "$W/modules/emp-core/public/index.php" > "$W/server.log" 2>&1 &
+          IP=$(hostname -I | tr ' ' '\n' | grep -E '^(10|192\.168|172\.(1[6-9]|2[0-9]|3[01]))\.' | head -1)
+          echo "Indirizzo del Server: $IP"
+          CA="$RUNNER_TEMP/emp-ca.crt"
+          B="https://$IP"
+          J=(--cacert "$CA" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json')
+          code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }
+          # Certificato dell'autorità locale scaricabile in HTTP; impronta uguale a quella mostrata.
+          curl -fsS "http://$IP/emp-ca.crt" -o "$CA"
+          FP=$(openssl x509 -in "$CA" -noout -fingerprint -sha256 | cut -d= -f2)
+          grep -qF "$FP" "$RUNNER_TEMP/installa-1.log"
+          # HTTP rinvia a HTTPS; il certificato del Server è valido per il suo indirizzo IP.
+          test "$(code "http://$IP/amministrazione/")" = 301
+          curl -fsS --cacert "$CA" "$B/api/v1/salute" | tee /dev/stderr | grep -q '"stato":"ok"'
+          curl -fsS --cacert "$CA" -o /dev/null "$B/amministrazione/setup.html"
+          # Servizi solo locali: MariaDB senza rete, PHP-FPM solo su socket.
+          if sudo ss -ltnp | grep -E 'mariadbd|mysqld|php-fpm'; then exit 1; fi
+          # Primo setup: senza codice rifiutato, con il codice mostrato dall'installazione riuscito.
+          SETUP_CODE=$(grep -oE 'EMP-[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}' "$RUNNER_TEMP/installa-1.log" | tail -1)
+          BODY='{"username":"tecnico","nome":"Tecnico CI","password":"Chiave-Sicura-CI-2026"}'
+          BODY_CODE=$(printf '{"codice":"%s","username":"tecnico","nome":"Tecnico CI","password":"Chiave-Sicura-CI-2026"}' "$SETUP_CODE")
+          test "$(code "${J[@]}" -X POST "$B/api/v1/accesso/setup" -d "$BODY")" = 401
+          curl -fsS "${J[@]}" -X POST "$B/api/v1/accesso/setup" -d "$BODY_CODE" | grep -q '"recovery_key":"EMP-'
+          test "$(code "${J[@]}" -X POST "$B/api/v1/accesso/setup" -d "$BODY_CODE")" = 409
+          # Accesso e pagina Plugin: installazione dal web del plugin dimostrativo.
+          curl -fsS -c "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Chiave-Sicura-CI-2026"}' | grep -q '"ruolo":"tecnico"'
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | grep -q '"stato":"installabile"'
+          test "$(code -b "$RUNNER_TEMP/jar" --cacert "$CA" -X POST "$B/api/v1/plugin/emp-esempio/installa")" = 403
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/emp-esempio/installa" | tee /dev/stderr | grep -q '"ok":true'
+          curl -fsS --cacert "$CA" "$B/api/v1/esempio" | grep -q '"modulo":"emp-esempio"'
+          # Il processo web (utente emp) non può toccare il Core né leggere le chiavi.
+          if sudo -u emp mv /var/lib/emp/moduli/emp-core /var/lib/emp/moduli/x; then exit 1; fi
+          if sudo -u emp touch /var/lib/emp/moduli/emp-core/public/x; then exit 1; fi
+          if sudo -u emp cat /etc/emp/tls/ca.key; then exit 1; fi
+          # Gestione dalla console.
+          sudo emp-server stato
+          sudo emp-server backup
+          sudo ls /var/lib/emp/backup/*/database.sql.gz
+          printf 'Recupero-Console-CI-2026\n' | sudo emp-server recupero-tecnico tecnico | grep -q 'Nuova Recovery Key: EMP-'
+          curl -fsS "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
+          sudo ufw status | tee /dev/stderr | grep -q '443/tcp'
+          systemctl list-timers emp-backup.timer emp-certificato.timer --no-pager | grep -q emp-backup
+      - name: Riesecuzione (aggiornamento) e riavvio dei servizi
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"/inst/emp-server-*
+          sudo ./installa.sh | tee "$RUNNER_TEMP/installa-2.log"
+          if grep -q 'Primo setup' "$RUNNER_TEMP/installa-2.log"; then exit 1; fi
+          sudo systemctl restart mariadb php*-fpm nginx
           sleep 2
-          curl -fsS $B/api/v1/salute | tee /dev/stderr | grep -q '"stato":"ok"'
-          curl -fsS -o /dev/null $B/amministrazione/plugin.html
-          # 4. Primo setup del Tecnico e accesso (solo password, offline).
-          J=(-H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json')
-          test "$(curl -s -o /dev/null -w '%{http_code}' $B/api/v1/plugin)" = 401
-          curl -fsS "${J[@]}" -X POST $B/api/v1/accesso/setup -d '{"username":"tecnico","nome":"Tecnico CI","password":"Chiave-Sicura-CI-2026"}' | grep -q '"recovery_key":"EMP-'
-          test "$(curl -s -o /dev/null -w '%{http_code}' "${J[@]}" -X POST $B/api/v1/accesso/setup -d '{"username":"altro","nome":"Altro","password":"Chiave-Sicura-CI-2026"}')" = 409
-          curl -fsS -c "$W/jar" "${J[@]}" -X POST $B/api/v1/accesso/login -d '{"username":"tecnico","password":"Chiave-Sicura-CI-2026"}' | grep -q '"ruolo":"tecnico"'
-          # 5. Pagina Plugin: elenco, protezioni, installazione.
-          curl -fsS -b "$W/jar" $B/api/v1/plugin | tee /dev/stderr | grep -q '"stato":"installabile"'
-          test "$(curl -s -o /dev/null -w '%{http_code}' -b "$W/jar" -X POST $B/api/v1/plugin/emp-esempio/installa)" = 403
-          test "$(curl -s -o /dev/null -w '%{http_code}' -b "$W/jar" -H 'Host: evil.example' $B/api/v1/plugin)" = 403
-          curl -fsS -b "$W/jar" "${J[@]}" -X POST $B/api/v1/plugin/emp-esempio/installa | tee /dev/stderr | grep -q '"ok":true'
-          curl -fsS $B/api/v1/esempio | grep -q '"modulo":"emp-esempio"'
-          # 6. Desk rieseguito: Core invariato, plugin intatto.
-          cargo run --locked -q --manifest-path desk/Cargo.toml -p emp-core-installer --example emp-install -- "$W/pacchetti-core" "$W/modules" | grep -q '^invariato emp-core'
-          test -f "$W/modules/emp-esempio/emp-module.json"
+          sudo emp-server moduli | grep -q emp-esempio
+          curl -fsS --cacert "$RUNNER_TEMP/emp-ca.crt" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json' \
+            -X POST "https://localhost/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
+      - name: Disinstallazione (i dati restano) e reinstallazione
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP"/inst/emp-server-*
+          sudo ./disinstalla.sh
+          if command -v emp-server; then exit 1; fi
+          sudo test -f /etc/emp/tls/ca.key
+          sudo ./installa.sh > /dev/null
+          sudo emp-server moduli | grep -q emp-esempio
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+      - name: Registri in caso di errore
+        if: failure()
+        run: |
+          sudo tail -n 50 /var/log/nginx/emp-errori.log /var/log/emp/php-errori.log 2>/dev/null || true
+          sudo journalctl -u nginx -u 'php*-fpm' -u mariadb --no-pager -n 80 || true

@@ -19,7 +19,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Installazione dei plugin dall'interfaccia web del Core:
- * il Core è già installato (da EMP Desk), i plugin arrivano dal catalogo.
+ * il Core è già installato (da EMP Server), i plugin arrivano dal catalogo.
  */
 final class PluginManagerTest extends TestCase
 {
@@ -36,7 +36,7 @@ final class PluginManagerTest extends TestCase
         $this->pdo = new \PDO('sqlite::memory:');
         $this->installer = new Installer($this->pdo, new Clock(), 'emp_');
         $core = (new Resolver())->resolve((new Registry($this->modules))->discover());
-        $this->installer->install($core, 'desk');
+        $this->installer->install($core, 'installer');
     }
 
     protected function tearDown(): void
@@ -156,7 +156,7 @@ final class PluginManagerTest extends TestCase
     {
         $this->writeIndex([['id' => 'emp-core', 'version' => '9.0.0', 'file' => 'emp-core-9.0.0.zip', 'sha256' => str_repeat('0', 64)]]);
         self::assertSame([], $this->manager()->overview()['plugin']);
-        $this->expectExceptionMessage('EMP Desk');
+        $this->expectExceptionMessage('EMP Server');
         $this->manager()->install('emp-core', 'tecnico');
     }
 

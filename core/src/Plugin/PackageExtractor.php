@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Emp\Core\Plugin;
 
 /**
- * Estrae un pacchetto verificato in modules/<id>/ con le stesse regole di
- * EMP Desk: ogni voce deve stare dentro la cartella del modulo, niente "..",
+ * Estrae un pacchetto verificato in modules/<id>/: ogni voce deve stare
+ * dentro la cartella del modulo, niente "..",
  * percorsi assoluti o collegamenti simbolici, limiti di dimensione reali.
  * I file vanno prima in una cartella temporanea; la versione precedente resta
  * in modules/.precedenti/ per il ripristino.

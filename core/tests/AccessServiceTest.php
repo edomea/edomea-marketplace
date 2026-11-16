@@ -58,7 +58,7 @@ final class AccessServiceTest extends TestCase
         $this->pdo = new \PDO('sqlite::memory:');
         $this->clock = new FixedClock();
         $this->installer = new Installer($this->pdo, $this->clock, 'emp_');
-        $this->installer->install((new Resolver())->resolve((new Registry($this->modules))->discover()), 'desk');
+        $this->installer->install((new Resolver())->resolve((new Registry($this->modules))->discover()), 'installer');
         $this->access = new AccessService($this->pdo, 'emp_core_', $this->clock);
     }
 

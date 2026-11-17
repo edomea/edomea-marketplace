@@ -162,7 +162,7 @@ jobs:
           REMOTO=$(sudo sh -c 'ls /srv/emp-remoto/EMP-backup/emp-backup-*.tar.bin' | head -1)
           test -n "$REMOTO"
           if sudo tar -tf "$REMOTO" >/dev/null 2>&1; then exit 1; fi
-          sudo emp-server backup-elenco | grep -q 'emp-backup-'
+          sudo emp-server backup-elenco | tee /dev/stderr | grep 'emp-backup-' >/dev/null
           printf 'Recupero-Console-CI-2026\n' | sudo emp-server recupero-tecnico tecnico | grep -q 'Nuova Recovery Key: EMP-'
           curl -fsS "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
           sudo ufw status | tee /dev/stderr | grep -q '443/tcp'

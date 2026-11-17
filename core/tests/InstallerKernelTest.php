@@ -58,9 +58,9 @@ final class InstallerKernelTest extends TestCase
         self::assertSame('ok', json_decode($health->body, true)['stato']);
         self::assertNull(json_decode($health->body, true)['server']);
         // Versione di EMP Server (dalla configurazione) mostrata nelle pagine.
-        $withServer = new Kernel($this->modules, $this->installer, new Clock(), null, null, null, '0.6.0-alpha.4');
+        $withServer = new Kernel($this->modules, $this->installer, new Clock(), null, null, null, '0.6.0-alpha.5');
         $versions = json_decode($withServer->handle(new Request('GET', '/api/v1/salute'))->body, true);
-        self::assertSame(['0.6.0-alpha.4', '0.1.5'], [$versions['server'], $versions['core']]);
+        self::assertSame(['0.6.0-alpha.5', '0.1.5'], [$versions['server'], $versions['core']]);
         $plugin = $kernel->handle(new Request('GET', '/api/v1/esempio'));
         self::assertSame(['modulo' => 'emp-esempio', 'versione' => '0.1.0'], json_decode($plugin->body, true));
         self::assertSame(404, $kernel->handle(new Request('GET', '/api/v1/inesistente'))->status);

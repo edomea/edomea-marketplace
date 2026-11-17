@@ -175,6 +175,37 @@ jobs:
           sudo ./installa.sh > /dev/null
           sudo emp-server moduli | grep -q emp-esempio
           test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+      - name: Total reset di un clone (azzera)
+        run: |
+          set -euo pipefail
+          FINTO=$RUNNER_TEMP/finto-runner
+          mkdir -p "$FINTO" && touch "$FINTO/.runner"
+          OLD_FP=$(sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -fingerprint -sha256)
+          OLD_ID=$(cat /etc/machine-id)
+          # Senza terminale e senza --si rifiuta; nome non valido rifiutato. Nessuna modifica.
+          if sudo EMP_RUNNER_DIR="$FINTO" emp-server azzera --nome cliente-prova </dev/null; then exit 1; fi
+          if sudo emp-server azzera --nome -x --si; then exit 1; fi
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+          test -e "$FINTO/.runner"
+          sudo EMP_RUNNER_DIR="$FINTO" emp-server azzera --nome cliente-prova --si | tee "$RUNNER_TEMP/azzera.log"
+          # Identità nuova, dati e collegamento GitHub tolti.
+          test "$(hostname -s)" = cliente-prova
+          test "$(cat /etc/machine-id)" != "$OLD_ID"
+          test ! -e "$FINTO"
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 0
+          if sudo emp-server moduli | grep -q emp-esempio; then exit 1; fi
+          if sudo sh -c 'ls /var/lib/emp/backup/*/database.sql.gz' 2>/dev/null; then exit 1; fi
+          test "$(sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -fingerprint -sha256)" != "$OLD_FP"
+          sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -text | grep -q 'DNS:cliente-prova'
+          # Di nuovo pronto per il primo setup, con il codice mostrato da azzera.
+          CA=$RUNNER_TEMP/ca-cliente.crt
+          sudo cat /etc/emp/tls/ca.crt > "$CA"
+          L=(--cacert "$CA" --resolve "cliente-prova:443:127.0.0.1" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json')
+          curl -fsS "${L[@]}" https://cliente-prova/api/v1/accesso/stato | grep -q '"inizializzato":false'
+          SETUP_CODE=$(grep -oE 'EMP-[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}' "$RUNNER_TEMP/azzera.log" | tail -1)
+          curl -fsS "${L[@]}" -X POST https://cliente-prova/api/v1/accesso/setup \
+            -d "$(printf '{"codice":"%s","username":"tecnico2","nome":"Tecnico cliente","password":"Chiave-Cliente-CI-2026"}' "$SETUP_CODE")" | grep -q '"recovery_key":"EMP-'
+          sudo emp-server stato
       - name: Registri in caso di errore
         if: failure()
         run: |

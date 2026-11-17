@@ -89,22 +89,22 @@ Per copiarlo sulla VM ci sono due modi.
 
 **Dal PC Windows** (PowerShell, nella cartella dove si trova il file). `scp` è già incluso in Windows 11:
 ```
-scp emp-server-0.6.0-alpha.4.tar.gz utente@IP-DEL-SERVER:
+scp emp-server-0.6.0-alpha.5.tar.gz utente@IP-DEL-SERVER:
 ```
 
 **Direttamente sulla VM**, se ha accesso a Internet:
 ```
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.4/emp-server-0.6.0-alpha.4.tar.gz
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.4/emp-server-0.6.0-alpha.4.tar.gz.sha256
-sha256sum -c emp-server-0.6.0-alpha.4.tar.gz.sha256
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.5/emp-server-0.6.0-alpha.5.tar.gz
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.5/emp-server-0.6.0-alpha.5.tar.gz.sha256
+sha256sum -c emp-server-0.6.0-alpha.5.tar.gz.sha256
 ```
 
 ### 2.2 Eseguire l'installazione
 
 Sulla VM, dalla console o via SSH (`ssh utente@IP-DEL-SERVER`):
 ```
-tar -xzf emp-server-0.6.0-alpha.4.tar.gz
-cd emp-server-0.6.0-alpha.4
+tar -xzf emp-server-0.6.0-alpha.5.tar.gz
+cd emp-server-0.6.0-alpha.5
 sudo ./installa.sh
 ```
 
@@ -215,6 +215,8 @@ Sul Server, dalla console o via SSH:
 | `sudo emp-server certificato` | Nuovo certificato, per esempio dopo un cambio di indirizzo IP |
 | `sudo emp-server backup` | Backup immediato |
 | `sudo emp-server moduli` | Core e plugin installati |
+| `sudo emp-server azzera --nome NOME` | Total reset di un clone del master per un nuovo cliente (vedi sotto) |
+| `sudo emp-server collega-github` | Collega il Server a GitHub per gli aggiornamenti |
 
 ### Aggiornare EMP
 
@@ -249,6 +251,32 @@ La cartella dei backup è riservata a root: prima copiarla in una cartella dell'
 sudo sha256sum -c SHA256SUMS
 gunzip -c database.sql.gz | sudo mariadb
 ```
+
+### Nuovo cliente white label: master → clone → azzera
+
+Una VM **master** resta sempre aggiornata all'ultima release e in stato di fabbrica: nessun Amministratore Tecnico, nessun dato. Non si usa mai in produzione. Per ogni nuovo cliente:
+
+1. **Clonare il master.** In VMware Workstation Pro, con il master spento: *VM → Manage → Clone → Full clone*. All'avvio del clone, se VMware lo chiede, scegliere **I copied it** (nuovo indirizzo MAC).
+2. **Azzerare il clone.** Dalla console del clone:
+
+   ```bash
+   sudo emp-server azzera --nome NOME-CLIENTE
+   ```
+
+   Il comando chiede di scrivere `AZZERA NOME-CLIENTE` come conferma, poi:
+   - toglie da questa macchina il collegamento a GitHub copiato dal master (su GitHub il runner del master resta registrato);
+   - svuota il database e cancella plugin, catalogo locale, backup e registri di prova;
+   - dà al clone un'identità propria: nome host, identificativo della macchina, chiavi SSH;
+   - crea una nuova autorità di certificazione e un nuovo certificato HTTPS con il nuovo nome;
+   - mostra l'impronta della nuova autorità e il codice monouso per il primo setup.
+
+   Restano Ubuntu, i pacchetti e il Core installato. Il nome: lettere minuscole, cifre e trattini, da 2 a 41 caratteri, diverso per ogni Server.
+3. **Riavviare** (`sudo reboot`). Se l'indirizzo IP cambia, riservarlo nel router del cliente: il certificato si aggiorna da solo.
+4. **Postazioni:** togliere la vecchia autorità "EMP CA locale" e installare la nuova (§ 3.1).
+5. **Primo setup** dell'Amministratore Tecnico con il codice monouso (§ 3.3) e custodia della nuova Recovery Key.
+6. **GitHub (facoltativo):** prendere un token di registrazione (*Settings → Actions → Runners → New self-hosted runner*, vale 1 ora) ed eseguire `sudo emp-server collega-github`. Il runner prende come nome ed etichetta il nome del Server.
+
+`azzera` è irreversibile: prima del comando fare un'istantanea o una copia della VM. Non eseguirlo sul master.
 
 ### Disinstallare
 

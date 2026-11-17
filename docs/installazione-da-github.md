@@ -95,6 +95,8 @@ Configurazione, modificabile solo da root, in `/etc/emp/github.conf`:
 
 Un runner per ogni Server, ciascuno con la propria etichetta (`--etichetta`). Al momento di *Run workflow* si sceglie l'etichetta del negozio da aggiornare. Un operatore white label con il proprio fork usa lo stesso schema sul proprio repository: `--repo PROPRIETARIO/REPO` in `prepara-runner.sh`.
 
+Un Server ottenuto clonando la VM master e azzerato con `sudo emp-server azzera --nome NOME` non è collegato a GitHub. Per collegarlo: `sudo emp-server collega-github`, con un nuovo token di registrazione. Nome ed etichetta del runner diventano il nome del Server, da scegliere in *Run workflow*. Procedura completa: [EMP Server su Ubuntu](ambiente-server-linux.md), § 5.
+
 ## 5. Limiti
 
 - GitHub sconsiglia i runner self-hosted sui repository pubblici. Le contromisure sono:

@@ -8,6 +8,8 @@
 #   sudo emp-server certificato [--se-necessario]  rigenera il certificato HTTPS (es. cambio indirizzo IP)
 #   sudo emp-server backup                         copia del database e della configurazione
 #   sudo emp-server moduli                         moduli installati (Core e plugin)
+#   sudo emp-server azzera --nome NOME             total reset di un clone del master (dati, identità, nome)
+#   sudo emp-server collega-github                 collega questo Server a GitHub (token da GitHub)
 #
 # Installato da installa.sh in /opt/emp/server, collegato in /usr/local/sbin/emp-server.
 set -euo pipefail
@@ -19,8 +21,10 @@ readonly EMP_TLS=$EMP_CONF_DIR/tls
 readonly EMP_DATA=/var/lib/emp
 readonly EMP_MODULES=$EMP_DATA/moduli
 readonly EMP_BACKUP=$EMP_DATA/backup
+readonly EMP_LOGS=/var/log/emp
 readonly EMP_USER=emp
 readonly EMP_HOME=/opt/emp/server
+readonly RUNNER_DIR=${EMP_RUNNER_DIR:-/opt/actions-runner}   # EMP_RUNNER_DIR: solo per i test
 readonly BACKUP_KEEP=14
 readonly CERT_DAYS=825
 readonly CERT_RENEW_SECONDS=$((60 * 24 * 3600))
@@ -49,6 +53,21 @@ private_ipv4() {
 }
 
 host_name() { hostname -s | tr '[:upper:]' '[:lower:]'; }
+
+# Cartelle di EMP con proprietari e permessi (usata da installa.sh e da azzera).
+create_dirs() {
+    install -d -m 0755 -o root -g root "$EMP_DATA" "$EMP_DATA/pubblico" /opt/emp
+    # Cartella dei moduli con sticky bit: emp vi installa i plugin dalla pagina web,
+    # ma non può modificare, rinominare o cancellare il Core (di proprietà di root).
+    install -d -m 1775 -o root -g "$EMP_USER" "$EMP_MODULES"
+    install -d -m 0755 -o root -g root "$EMP_DATA/catalogo"
+    # Catalogo locale del Core: plugin caricati a mano dal Tecnico o importati da una release GitHub.
+    install -d -m 0750 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/catalogo-locale"
+    install -d -m 0700 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/tmp"
+    install -d -m 0700 -o root -g root "$EMP_BACKUP"
+    install -d -m 0750 -o "$EMP_USER" -g adm "$EMP_LOGS"
+    install -d -m 0755 -o root -g root "$EMP_CONF_DIR"
+}
 
 extra_dns() {
     if [[ -f $EMP_CONF_DIR/nome-dns ]]; then tr -d '[:space:]' < "$EMP_CONF_DIR/nome-dns"; fi
@@ -213,8 +232,190 @@ cmd_moduli() {
     core_cli elenco
 }
 
+# ---------------------------------------------------------------- total reset (clone del master)
+#
+# Procedura white label: una VM "master" resta aggiornata all'ultima release e in stato di
+# fabbrica; per ogni nuovo cliente se ne fa un clone completo in VMware e, sul clone:
+#   sudo emp-server azzera --nome NOME-CLIENTE
+# Cancella TUTTI i dati di EMP (database, plugin, catalogo locale, backup, registri) e dà al
+# clone un'identità propria: nome host, identificativo della macchina, chiavi SSH, autorità di
+# certificazione e certificato HTTPS. Il collegamento a GitHub ereditato dal master viene tolto
+# SOLO da questa macchina (su GitHub il runner del master resta registrato): per collegare il
+# clone, sudo emp-server collega-github. Restano Ubuntu, i pacchetti e il Core installato.
+
+valid_server_name() { [[ $1 =~ ^[a-z0-9][a-z0-9-]{0,39}[a-z0-9]$ ]]; }
+
+# Toglie da questa macchina il runner GitHub copiato dal master, senza deregistrarlo da GitHub
+# (config.sh remove cancellerebbe il runner del master, che usa le stesse credenziali).
+detach_runner() {
+    if [[ ! -d $RUNNER_DIR ]]; then
+        info "Nessun collegamento a GitHub su questa macchina"
+        return 0
+    fi
+    if [[ -f $RUNNER_DIR/.service ]]; then
+        ( cd "$RUNNER_DIR" && { ./svc.sh stop >/dev/null 2>&1 || true; ./svc.sh uninstall >/dev/null 2>&1 || true; } )
+    fi
+    rm -rf "$RUNNER_DIR"
+    info "Collegamento a GitHub copiato dal master rimosso da questa macchina"
+}
+
+new_system_identity() {
+    local name=$1
+    hostnamectl set-hostname "$name"
+    if grep -qE '^127\.0\.1\.1[[:space:]]' /etc/hosts; then
+        sed -i -E "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1\t${name}/" /etc/hosts
+    else
+        printf '127.0.1.1\t%s\n' "$name" >> /etc/hosts
+    fi
+    # cloud-init non deve rimettere il nome del master al prossimo avvio.
+    if [[ -d /etc/cloud/cloud.cfg.d ]]; then
+        printf '# EMP Server: nome host impostato da emp-server azzera\npreserve_hostname: true\n' > /etc/cloud/cloud.cfg.d/99-emp-nome.cfg
+    fi
+    # Identificativo casuale: systemd-machine-id-setup potrebbe riusare l'UUID della VM.
+    rm -f /var/lib/dbus/machine-id
+    tr -d '-' < /proc/sys/kernel/random/uuid > /etc/machine-id
+    chmod 0444 /etc/machine-id
+    [[ -d /var/lib/dbus ]] && ln -sf /etc/machine-id /var/lib/dbus/machine-id
+    info "Nome host: ${name}; nuovo identificativo della macchina"
+    if compgen -G '/etc/ssh/ssh_host_*' >/dev/null; then
+        rm -f /etc/ssh/ssh_host_*
+        ssh-keygen -A >/dev/null
+        systemctl restart ssh 2>/dev/null || systemctl restart sshd 2>/dev/null || true
+        info "Nuove chiavi SSH (chi si collegava in SSH vedrà un avviso di chiave cambiata: è normale)"
+    fi
+}
+
+wipe_emp_data() {
+    local fpm
+    fpm="php$(php_version)-fpm"
+    systemctl stop emp-backup.timer emp-certificato.timer nginx "$fpm" 2>/dev/null || true
+
+    mariadb <<'SQL'
+DROP DATABASE IF EXISTS emp;
+CREATE DATABASE emp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'emp'@'localhost' IDENTIFIED VIA unix_socket;
+GRANT ALL PRIVILEGES ON emp.* TO 'emp'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+    info "Database emp svuotato"
+
+    # Moduli: resta solo il Core; via plugin installati, caricati, backup e versioni precedenti.
+    find "$EMP_MODULES" -mindepth 1 -maxdepth 1 ! -name emp-core -exec rm -rf -- {} +
+    rm -rf "$EMP_DATA/catalogo-locale" "$EMP_DATA/tmp" "$EMP_BACKUP" "$EMP_DATA/precedenti" \
+        "$EMP_DATA/pubblico/emp-ca.crt" "$EMP_DATA"/.core-*
+    create_dirs
+    info "Dati, plugin, catalogo locale e backup di prova cancellati"
+
+    find "$EMP_LOGS" -mindepth 1 -type f -delete
+    rm -f /var/log/nginx/emp-*
+    journalctl --rotate >/dev/null 2>&1 || true
+    journalctl --vacuum-time=1s >/dev/null 2>&1 || true
+    info "Registri di prova cancellati"
+
+    # Identità HTTPS e nome DNS aggiuntivo appartengono alla macchina d'origine.
+    rm -rf "$EMP_TLS"
+    rm -f "$EMP_CONF_DIR/nome-dns"
+    if [[ -f $EMP_CONF_DIR/github.conf ]]; then
+        sed -i -E 's/^EMP_NOME_DNS=.*/EMP_NOME_DNS=/' "$EMP_CONF_DIR/github.conf"
+    fi
+}
+
+cmd_azzera() {
+    require_root azzera
+    local name='' yes=0 answer fpm _
+    while (($#)); do
+        case $1 in
+            --nome) [[ $# -ge 2 ]] || die "manca il nome dopo --nome"; name=$2; shift 2 ;;
+            --si) yes=1; shift ;;
+            *) die "opzione sconosciuta: $1" ;;
+        esac
+    done
+    name=$(tr '[:upper:]' '[:lower:]' <<<"$name")
+    [[ -n $name ]] || die "uso: sudo emp-server azzera --nome NOME-DEL-SERVER"
+    valid_server_name "$name" || die "nome non valido: ${name} (lettere minuscole, cifre e trattini, da 2 a 41 caratteri, senza trattino iniziale o finale)"
+    [[ -f $EMP_CONFIG && -f $EMP_MODULES/emp-core/emp-module.json ]] || die "EMP Server non è installato su questa macchina"
+
+    cat <<EOF
+
+TOTAL RESET di EMP Server — operazione IRREVERSIBILE.
+
+Su QUESTA macchina ($(host_name)) verranno cancellati:
+  - database emp: utenti, Amministratore Tecnico, Recovery Key, dati, registro delle operazioni;
+  - plugin installati e caricati, backup, registri di EMP;
+  - autorità di certificazione e certificato HTTPS (le postazioni dovranno installare quella nuova);
+  - collegamento a GitHub copiato dal master.
+Il Server prenderà il nome "${name}", un nuovo identificativo e nuove chiavi SSH.
+
+Usare SOLO su un clone. Sulla macchina master NON va eseguito.
+Prima: istantanea o copia della VM in VMware.
+
+EOF
+    if ((yes == 0)); then
+        [[ -t 0 ]] || die "conferma richiesta: eseguire dalla console della VM (oppure aggiungere --si)"
+        read -r -p "Per confermare scrivere: AZZERA ${name}  > " answer
+        [[ $answer == "AZZERA ${name}" ]] || die "annullato: nessuna modifica"
+    fi
+
+    echo "==> Scollegamento da GitHub"
+    detach_runner
+    echo "==> Cancellazione dei dati di EMP"
+    wipe_emp_data
+    echo "==> Nuova identità della macchina"
+    new_system_identity "$name"
+    echo "==> Nuova autorità di certificazione e certificato HTTPS"
+    cmd_certificato
+    echo "==> Core sul database vuoto"
+    core_cli installa --utente=installer | sed 's/^/  /'
+    fpm="php$(php_version)-fpm"
+    systemctl start "$fpm" nginx
+    systemctl start emp-backup.timer emp-certificato.timer
+    for _ in $(seq 1 30); do
+        if curl -fsS --max-time 5 --cacert "$EMP_TLS/ca.crt" --resolve "localhost:443:127.0.0.1" \
+            https://localhost/api/v1/salute >/dev/null 2>&1; then
+            break
+        fi
+        sleep 1
+    done
+    curl -fsS --max-time 5 --cacert "$EMP_TLS/ca.crt" --resolve "localhost:443:127.0.0.1" \
+        https://localhost/api/v1/salute >/dev/null 2>&1 || die "il Core non risponde: sudo emp-server stato"
+
+    local code ip
+    code=$(core_cli codice-setup | sed -n 's/^Codice di setup: //p')
+    echo
+    echo "================================================================"
+    echo " Server \"${name}\" azzerato: pronto per il primo setup"
+    echo "================================================================"
+    echo
+    echo " 1) Su ogni PC del negozio togliere la vecchia autorità \"EMP CA locale\" e installare la nuova:"
+    for ip in $(private_ipv4); do echo "      http://${ip}/emp-ca.crt"; done
+    echo "    Impronta SHA-256 da confrontare:"
+    echo "      $(ca_fingerprint)"
+    echo
+    echo " 2) Primo setup dell'Amministratore Tecnico — codice monouso (valido 24 ore):"
+    echo
+    echo "      ${code}"
+    echo
+    for ip in $(private_ipv4); do echo "      https://${ip}/techadmin/setup.html"; done
+    echo
+    echo " 3) Per aggiornarlo da GitHub:  sudo emp-server collega-github"
+    echo
+    echo " Consigliato: riavviare la VM (sudo reboot). Se dopo il riavvio l'indirizzo IP cambia,"
+    echo " riservarlo nel router: il certificato si aggiorna da solo (oppure: sudo emp-server certificato)."
+    echo
+}
+
+# ---------------------------------------------------------------- collegamento a GitHub
+
+cmd_collega_github() {
+    require_root collega-github
+    local script=$EMP_HOME/github/prepara-runner.sh
+    [[ -x $script ]] || die "script di collegamento mancante ($script): aggiornare EMP Server"
+    # Nome ed etichetta del runner = nome del Server: ogni negozio si sceglie da GitHub per nome.
+    "$script" --nome "$(host_name)" --etichetta "$(host_name)" "$@"
+}
+
 usage() {
-    sed -n '2,12p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -228,6 +429,8 @@ main() {
         certificato) cmd_certificato "$@" ;;
         backup) cmd_backup ;;
         moduli) cmd_moduli ;;
+        azzera) cmd_azzera "$@" ;;
+        collega-github) cmd_collega_github "$@" ;;
         -h | --help | aiuto | '') usage ;;
         *) usage >&2; exit 2 ;;
     esac

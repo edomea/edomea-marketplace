@@ -17,7 +17,7 @@ use Emp\Core\Support\Clock;
  *    'prefix' => 'emp_', 'timezone' => 'Europe/Rome', 'modules_dir' => '/…/modules',
  *    'catalog_dir' => '/…/catalogo',          // facoltativo: catalogo di EMP Server (sola lettura)
  *    'local_catalog_dir' => '/…/catalogo-locale',  // facoltativo: pacchetti caricati a mano o importati da GitHub
- *    'server_version' => '0.6.0-alpha.4']         // facoltativo: versione di EMP Server, mostrata nelle pagine
+ *    'server_version' => '0.6.0-alpha.5']         // facoltativo: versione di EMP Server, mostrata nelle pagine
  */
 final class Config
 {

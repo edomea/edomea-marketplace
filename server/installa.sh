@@ -31,7 +31,6 @@ readonly SOURCE_DIR
 source "$SOURCE_DIR/emp-server"
 umask 022
 
-readonly EMP_LOGS=/var/log/emp
 readonly SUPPORTED_UBUNTU="24.04 26.04"
 readonly MIN_PHP=8.2
 EMP_VERSION=$(tr -d '[:space:]' < "$SOURCE_DIR/VERSIONE")
@@ -113,17 +112,7 @@ create_layout() {
         useradd --system --home-dir "$EMP_DATA" --no-create-home --shell /usr/sbin/nologin "$EMP_USER"
         info "Creato l'utente di sistema $EMP_USER"
     fi
-    install -d -m 0755 -o root -g root "$EMP_DATA" "$EMP_DATA/pubblico" /opt/emp
-    # Cartella dei moduli con sticky bit: emp vi installa i plugin dalla pagina web,
-    # ma non può modificare, rinominare o cancellare il Core (di proprietà di root).
-    install -d -m 1775 -o root -g "$EMP_USER" "$EMP_MODULES"
-    install -d -m 0755 -o root -g root "$EMP_DATA/catalogo"
-    # Catalogo locale del Core: plugin caricati a mano dal Tecnico o importati da una release GitHub.
-    install -d -m 0750 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/catalogo-locale"
-    install -d -m 0700 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/tmp"
-    install -d -m 0700 -o root -g root "$EMP_BACKUP"
-    install -d -m 0750 -o "$EMP_USER" -g adm "$EMP_LOGS"
-    install -d -m 0755 -o root -g root "$EMP_CONF_DIR"
+    create_dirs
     if [[ -n ${EMP_NOME_DNS:-} ]]; then
         [[ $EMP_NOME_DNS =~ ^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$ ]] || die "EMP_NOME_DNS non valido: $EMP_NOME_DNS"
         echo "$EMP_NOME_DNS" > "$EMP_CONF_DIR/nome-dns"
@@ -286,6 +275,11 @@ install_programs() {
     install -d -m 0755 -o root -g root "$EMP_HOME"
     install -m 0755 "$SOURCE_DIR/emp-server" "$EMP_HOME/emp-server"
     install -m 0644 "$SOURCE_DIR/VERSIONE" "$EMP_HOME/VERSIONE"
+    # Script per collegare il Server a GitHub (emp-server collega-github).
+    if [[ -d $SOURCE_DIR/github ]]; then
+        install -d -m 0755 -o root -g root "$EMP_HOME/github"
+        install -m 0755 "$SOURCE_DIR/github/prepara-runner.sh" "$SOURCE_DIR/github/emp-installa-da-github" "$EMP_HOME/github/"
+    fi
     ln -sfn "$EMP_HOME/emp-server" /usr/local/sbin/emp-server
 }
 
@@ -331,7 +325,7 @@ summary() {
         echo "    Se scade o si perde: sudo emp-server codice-setup"
     fi
     echo
-    echo " Gestione: sudo emp-server stato | backup | certificato | recupero-tecnico NOME"
+    echo " Gestione: sudo emp-server stato | backup | certificato | recupero-tecnico NOME | collega-github"
     echo
 }
 

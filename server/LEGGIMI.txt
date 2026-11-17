@@ -18,6 +18,9 @@ Alla fine vengono mostrati:
 
 Gestione:   sudo emp-server stato | indirizzi | codice-setup | backup | certificato
 Recupero:   sudo emp-server recupero-tecnico NOME   (se la Recovery Key è persa)
+Nuovo cliente (clone della VM master):
+            sudo emp-server azzera --nome NOME     (total reset: dati, identità, nome)
+            sudo emp-server collega-github         (collegamento a GitHub, facoltativo)
 Rimozione:  sudo ./disinstalla.sh                    (i dati restano)
 
 Installazione e aggiornamento da GitHub (runner sulla VM, nessuna porta aperta):

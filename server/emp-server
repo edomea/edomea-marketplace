@@ -473,7 +473,7 @@ cmd_ripristina() {
         esac
     done
     if [[ -n $remote ]]; then
-        [[ $remote =~ ^emp-backup-[a-z0-9-]+\.tar$ ]] || die "nome di backup remoto non valido (vedi: sudo emp-server backup-elenco)"
+        [[ $remote =~ ^emp-backup-[a-z0-9.-]+\.tar$ && $remote != *..* ]] || die "nome di backup remoto non valido (vedi: sudo emp-server backup-elenco)"
         remote_configured || die "nessuna destinazione remota collegata (sudo emp-server backup-remoto collega … --chiave CHIAVE)"
         install -d -m 0700 -o root -g root "$EMP_BACKUP"
         file="$EMP_BACKUP/$remote"

@@ -1,6 +1,6 @@
 # Edomea Marketplace 0.5.0 — Manuale tecnico-operativo
 
-**Software commerciale white label** · Baseline di progettazione · 16 novembre 2026
+**Software commerciale white label** · Baseline di progettazione · 17 novembre 2026
 
 > *Vendi e compra dove vuoi e come vuoi.*
 
@@ -11,6 +11,7 @@
 | 0.4.2 | 16/11/2026 | Accesso con sola password (funzionamento offline), Recovery Key del Tecnico; TOTP/OTP rimossi |
 | 0.4.3 | 16/11/2026 | Web server: **Caddy** al posto di Nginx (Nginx per Windows è dichiarato dai suoi sviluppatori solo per sviluppo e test); database MariaDB 11.4 LTS; GUI di Desk: Tauri 2 |
 | 0.5.0 | 16/11/2026 | **Edomea Desk eliminato** (decisione del titolare: troppo complesso mantenere Windows e macOS). Il Server del negozio è **EMP Server su Ubuntu Server LTS** (26.04 consigliata, 24.04 supportata), anche in macchina virtuale VMware Workstation Pro; Nginx, PHP-FPM e MariaDB dai repository di Ubuntu; **HTTPS in LAN** con autorità di certificazione locale; le postazioni usano il browser. Primo setup con codice monouso; recupero del Tecnico anche dalla console del Server |
+| 0.5.1 | 17/11/2026 | Nuovo cliente white label da **VM master**: clone completo in VMware e total reset con `emp-server azzera --nome NOME` (dati, identità della macchina, autorità di certificazione, collegamento GitHub); collegamento del clone con `emp-server collega-github` (EMP Server 0.6.0-alpha.4) |
 
 ---
 
@@ -104,6 +105,17 @@ I pacchetti ufficiali sono distribuiti con marchio Edomea. Le installazioni whit
 6. Configurare identità azienda/negozio, incluso il marchio white label, e installare i plugin dalla pagina *Plugin*. Collegamento Web facoltativo.
 
 Dettagli: [EMP Server su Ubuntu](ambiente-server-linux.md).
+
+### Nuovo cliente white label (VM master)
+
+Una macchina virtuale **master** resta aggiornata all'ultima release e in stato di fabbrica, senza Amministratore Tecnico né dati, e non si usa in produzione. Per ogni nuovo cliente:
+
+1. clone completo del master in VMware Workstation Pro, con nuovo indirizzo MAC;
+2. sul clone, `sudo emp-server azzera --nome NOME-CLIENTE`: cancella dati, plugin, backup e registri; assegna nome host, identificativo della macchina e chiavi SSH propri; crea nuova autorità di certificazione e nuovo certificato; toglie il collegamento a GitHub copiato dal master;
+3. installazione della nuova autorità sulle postazioni e primo setup dell'Amministratore Tecnico con il codice monouso;
+4. se il Server deve aggiornarsi da GitHub, `sudo emp-server collega-github` con un token di registrazione autorizzato dal titolare.
+
+Ogni Server ha un nome diverso. L'azzeramento è irreversibile: prima si fa un'istantanea o una copia della VM.
 
 ### Postazioni
 

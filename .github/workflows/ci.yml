@@ -112,6 +112,28 @@ jobs:
           test "$(code -b "$RUNNER_TEMP/jar" --cacert "$CA" -X POST "$B/api/v1/plugin/emp-esempio/installa")" = 403
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/emp-esempio/installa" | tee /dev/stderr | grep -q '"ok":true'
           curl -fsS --cacert "$CA" "$B/api/v1/esempio" | grep -q '"modulo":"emp-esempio"'
+          # Caricamento manuale di un pacchetto (oltre 2 MB: limiti di Nginx e PHP-FPM) e aggiornamento.
+          ZIP="$RUNNER_TEMP/emp-esempio-0.1.1.zip"
+          # shellcheck disable=SC2016  # codice PHP, non variabili della shell
+          php -r '
+            [$src, $dst] = [$argv[1], $argv[2]];
+            $m = json_decode(file_get_contents("$src/emp-module.json"), true); $m["version"] = "0.1.1";
+            $z = new ZipArchive(); $z->open($dst, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($src, FilesystemIterator::SKIP_DOTS));
+            foreach ($it as $f) { $rel = substr($f->getPathname(), strlen($src) + 1); if ($rel !== "emp-module.json") $z->addFile($f->getPathname(), "emp-esempio/$rel"); }
+            $z->addFromString("emp-esempio/emp-module.json", json_encode($m));
+            $z->addFromString("emp-esempio/dati/prova.bin", random_bytes(2500000));
+            $z->setCompressionName("emp-esempio/dati/prova.bin", ZipArchive::CM_STORE);
+            $z->close();' plugins/emp-esempio "$ZIP"
+          UP=(-b "$RUNNER_TEMP/jar" --cacert "$CA" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/zip' --data-binary "@$ZIP")
+          test "$(code "${UP[@]}" -H 'X-EMP-Impronta: 0000000000000000000000000000000000000000000000000000000000000000' "$B/api/v1/plugin/carica")" = 409
+          curl -fsS "${UP[@]}" -H "X-EMP-Impronta: $(sha256sum "$ZIP" | cut -d' ' -f1)" "$B/api/v1/plugin/carica" | tee /dev/stderr | grep -q '"nuovo":true'
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | grep -q '"stato":"aggiornabile"'
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/emp-esempio/installa" | grep -q '"ok":true'
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | grep -q '"versione_installata":"0.1.1"'
+          # Sorgente GitHub: disattivata di predefinito.
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin/github" | grep -q '"attiva":false'
+          test "$(code -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin/github/release")" = 409
           # Il processo web (utente emp) non può toccare il Core né leggere le chiavi.
           if sudo -u emp mv /var/lib/emp/moduli/emp-core /var/lib/emp/moduli/x; then exit 1; fi
           if sudo -u emp touch /var/lib/emp/moduli/emp-core/public/x; then exit 1; fi

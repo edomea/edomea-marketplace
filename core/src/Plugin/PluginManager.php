@@ -15,7 +15,10 @@ use Emp\Core\Module\Resolver;
  *
  * Fonti:
  * - cartella modules/: Core (installato da EMP Server) e plugin già presenti;
- * - catalogo: pacchetti verificati dei plugin installabili.
+ * - catalogo di EMP Server: pacchetti verificati inclusi nel pacchetto del Server;
+ * - catalogo locale: pacchetti caricati a mano dal Tecnico o importati da una
+ *   release GitHub (opzione facoltativa). Per ogni plugin vale la versione più
+ *   recente tra i due cataloghi; a parità di versione, quella di EMP Server.
  *
  * Installazione di un plugin: calcolo del piano con le dipendenze, estrazione
  * dal catalogo dei pacchetti mancanti o più recenti, migrazioni nel database
@@ -28,7 +31,37 @@ final class PluginManager
         private readonly Catalog $catalog,
         private readonly Installer $installer,
         private readonly string $phpVersion = PHP_VERSION,
+        private readonly ?LocalCatalog $local = null,
     ) {
+    }
+
+    public function localCatalog(): ?LocalCatalog
+    {
+        return $this->local;
+    }
+
+    /**
+     * Aggiunge al catalogo locale un pacchetto caricato a mano. Il plugin non viene
+     * ancora installato: compare nella pagina Plugin come installabile o aggiornabile.
+     *
+     * @return array{id: string, version: string, file: string, sha256: string, origine: string, nuovo: bool}
+     */
+    public function upload(string $zipPath, string $origin, ?string $expectedSha256 = null): array
+    {
+        if ($this->local === null) {
+            throw new PackageException('Catalogo locale non configurato (local_catalog_dir)');
+        }
+        $entry = $this->local->add($zipPath, $origin, $expectedSha256);
+        // Ricontrollo completo, come per ogni pacchetto del catalogo.
+        $this->local->reader()->verify($entry);
+
+        return $entry;
+    }
+
+    /** Toglie un pacchetto dal catalogo locale; il plugin eventualmente installato resta. */
+    public function removePackage(string $id): bool
+    {
+        return $this->local !== null && $this->local->remove($id);
     }
 
     /**
@@ -41,7 +74,9 @@ final class PluginManager
         $installed = $this->installer->installed();
         $present = $this->presentById();
         $errors = [];
-        $catalog = $this->catalogPackages($errors);
+        $origins = [];
+        $catalog = $this->catalogPackages($errors, $origins);
+        $localIds = $this->local !== null ? array_keys($this->local->origins()) : [];
 
         $ids = array_unique(array_merge(array_keys($catalog), array_keys($present)));
         sort($ids);
@@ -64,11 +99,14 @@ final class PluginManager
                 'dipendenze' => $info !== null ? array_map('strval', $info->requires) : [],
                 'stato' => $state,
                 'motivo' => $reason,
+                'origine' => $origins[$id] ?? null,
+                'nel_catalogo_locale' => in_array($id, $localIds, true),
             ];
         }
 
         return [
-            'catalogo' => $this->catalog->isConfigured(),
+            'catalogo' => $this->catalog->isConfigured() || $this->local !== null,
+            'catalogo_locale' => $this->local?->isWritable() ?? false,
             'core' => $installed[Manifest::CORE_ID] ?? null,
             'plugin' => $rows,
             'errori' => $errors,
@@ -129,21 +167,35 @@ final class PluginManager
 
     /**
      * @param list<string> $errors
+     * @param array<string, string> $origins id => origine del pacchetto scelto
      * @return array<string, VerifiedPackage>
      */
-    private function catalogPackages(array &$errors): array
+    private function catalogPackages(array &$errors, array &$origins = []): array
     {
         $out = [];
-        try {
-            foreach ($this->catalog->entries() as $entry) {
-                try {
-                    $out[$entry['id']] = $this->catalog->verify($entry);
-                } catch (PackageException $e) {
-                    $errors[] = $e->getMessage();
+        $sources = [[$this->catalog, null]];
+        if ($this->local !== null) {
+            $sources[] = [$this->local->reader(), $this->local->origins()];
+        }
+        foreach ($sources as [$catalog, $localOrigins]) {
+            try {
+                foreach ($catalog->entries() as $entry) {
+                    try {
+                        $package = $catalog->verify($entry);
+                    } catch (PackageException $e) {
+                        $errors[] = $e->getMessage();
+                        continue;
+                    }
+                    $id = $entry['id'];
+                    if (isset($out[$id]) && $package->manifest->version->compare($out[$id]->manifest->version) <= 0) {
+                        continue;
+                    }
+                    $out[$id] = $package;
+                    $origins[$id] = $localOrigins === null ? 'Pacchetto EMP Server' : ($localOrigins[$id] ?? 'Catalogo locale');
                 }
+            } catch (PackageException $e) {
+                $errors[] = $e->getMessage();
             }
-        } catch (PackageException $e) {
-            $errors[] = $e->getMessage();
         }
 
         return $out;

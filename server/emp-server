@@ -200,7 +200,7 @@ cmd_backup() {
     install -d -m 0700 "$dest"
     mariadb-dump --single-transaction --routines --events --databases emp | gzip -9 > "$dest/database.sql.gz"
     # Configurazione e moduli (inclusa la chiave dell'autorità locale: la cartella è riservata a root).
-    tar -czf "$dest/configurazione.tar.gz" -C / etc/emp var/lib/emp/moduli var/lib/emp/catalogo 2>/dev/null
+    tar -czf "$dest/configurazione.tar.gz" -C / etc/emp var/lib/emp/moduli var/lib/emp/catalogo var/lib/emp/catalogo-locale 2>/dev/null
     ( cd "$dest" && sha256sum ./*.gz > SHA256SUMS )
     info "Backup creato: $dest"
     # Conserva solo gli ultimi BACKUP_KEEP.

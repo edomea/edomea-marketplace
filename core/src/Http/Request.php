@@ -20,7 +20,24 @@ final class Request
         public readonly string $remoteAddr = '',
         public readonly string $body = '',
         public readonly array $params = [],
+        private readonly string $inputUri = 'php://input',
     ) {
+    }
+
+    /**
+     * Corpo completo della richiesta come flusso, per i caricamenti di file
+     * ($body contiene al massimo i primi 64 KiB, sufficienti per il JSON).
+     *
+     * @return resource
+     */
+    public function openBody()
+    {
+        $in = @fopen($this->inputUri, 'rb');
+        if ($in === false) {
+            throw new \RuntimeException('Corpo della richiesta non leggibile');
+        }
+
+        return $in;
     }
 
     public static function fromGlobals(): self
@@ -104,6 +121,6 @@ final class Request
     /** @param array<string, string> $params */
     public function withParams(array $params): self
     {
-        return new self($this->method, $this->path, $this->headers, $this->remoteAddr, $this->body, $params);
+        return new self($this->method, $this->path, $this->headers, $this->remoteAddr, $this->body, $params, $this->inputUri);
     }
 }

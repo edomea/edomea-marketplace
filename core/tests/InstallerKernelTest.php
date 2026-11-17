@@ -41,8 +41,8 @@ final class InstallerKernelTest extends TestCase
     public function testInstallCoreThenPluginAndBoot(): void
     {
         $log = $this->installer->install($this->plan(), 'tecnico');
-        self::assertSame(['Installato emp-core 0.1.2 (2 migrazioni)', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
-        self::assertSame(['emp-core' => '0.1.2', 'emp-esempio' => '0.1.0'], $this->installer->installed());
+        self::assertSame(['Installato emp-core 0.1.3 (2 migrazioni)', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
+        self::assertSame(['emp-core' => '0.1.3', 'emp-esempio' => '0.1.0'], $this->installer->installed());
 
         $tables = $this->pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")->fetchAll(\PDO::FETCH_COLUMN);
         self::assertSame([
@@ -69,7 +69,7 @@ final class InstallerKernelTest extends TestCase
     {
         $this->installer->install($this->plan(), 'tecnico');
         $log = $this->installer->install($this->plan(), 'tecnico');
-        self::assertSame(['emp-core 0.1.2 già installato', 'emp-esempio 0.1.0 già installato'], $log);
+        self::assertSame(['emp-core 0.1.3 già installato', 'emp-esempio 0.1.0 già installato'], $log);
     }
 
     public function testPluginRefusedWithoutCore(): void
@@ -150,7 +150,7 @@ final class InstallerKernelTest extends TestCase
         }
         $this->installer->uninstall('emp-figlio', $available, 'tecnico');
         $this->installer->uninstall('emp-esempio', $available, 'tecnico');
-        self::assertSame(['emp-core' => '0.1.2'], $this->installer->installed());
+        self::assertSame(['emp-core' => '0.1.3'], $this->installer->installed());
         // I dati restano.
         self::assertSame(1, (int) $this->pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE name = 'emp_esempio_note'")->fetchColumn());
     }

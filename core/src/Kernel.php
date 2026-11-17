@@ -17,7 +17,12 @@ use Emp\Core\Module\Registry;
 use Emp\Core\Module\ResolutionException;
 use Emp\Core\Module\Resolver;
 use Emp\Core\Plugin\Catalog;
+use Emp\Core\Plugin\CurlHttpClient;
+use Emp\Core\Plugin\GitHubSource;
+use Emp\Core\Plugin\HttpClient;
+use Emp\Core\Plugin\LocalCatalog;
 use Emp\Core\Plugin\PluginManager;
+use Emp\Core\Support\AuditLog;
 use Emp\Core\Support\Clock;
 
 /**
@@ -37,6 +42,8 @@ final class Kernel
         private readonly Installer $installer,
         public readonly Clock $clock,
         private readonly ?string $catalogDir = null,
+        private readonly ?string $localCatalogDir = null,
+        private readonly ?HttpClient $http = null,
     ) {
         $this->router = new Router();
         $this->autoloader = new Psr4Autoloader();
@@ -101,7 +108,29 @@ final class Kernel
     /** Gestione dei plugin (pagina web Plugin del Core). */
     public function plugins(): PluginManager
     {
-        return new PluginManager($this->modulesDir, new Catalog($this->catalogDir), $this->installer);
+        return new PluginManager(
+            $this->modulesDir,
+            new Catalog($this->catalogDir),
+            $this->installer,
+            PHP_VERSION,
+            $this->localCatalogDir !== null ? new LocalCatalog($this->localCatalogDir) : null,
+        );
+    }
+
+    /** Sorgente GitHub facoltativa dei plugin (null senza catalogo locale). */
+    public function githubSource(): ?GitHubSource
+    {
+        if ($this->localCatalogDir === null) {
+            return null;
+        }
+
+        return new GitHubSource(new LocalCatalog($this->localCatalogDir), $this->http ?? new CurlHttpClient());
+    }
+
+    /** Registro di tracciabilità del Core. */
+    public function audit(): AuditLog
+    {
+        return new AuditLog($this->installer->pdo(), $this->installer->tablePrefix('core_') . 'audit', $this->clock);
     }
 
     public function handle(Request $request): Response

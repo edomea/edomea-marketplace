@@ -183,7 +183,7 @@ Dopo il setup, il Tecnico crea gli amministratori e installa i plugin dalla pagi
 | `/var/lib/emp/moduli/<plugin>/` | plugin installati dalla pagina web | `emp` |
 | `/var/lib/emp/catalogo/` | plugin installabili, con impronte SHA-256 | root |
 | `/var/lib/emp/backup/` | backup completi di EMP (ultimi 14) | root |
-| `/opt/emp/server/pacchetto/` | pacchetto della versione installata (incluso nei backup) | root |
+| `/var/lib/emp/pacchetto/` | pacchetto della versione installata (incluso nei backup) | root |
 | `/etc/emp/backup-remoto/` | destinazione remota e chiave dei backup (della macchina) | root |
 | `/var/lib/emp/precedenti/` | ultime 5 versioni del Core sostituite | root |
 | `/var/log/emp/`, `/var/log/nginx/emp-*.log` | registri | |

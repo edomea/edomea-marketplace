@@ -1,0 +1,27 @@
+EMP — Edomea Marketplace · EMP Server
+=====================================
+
+Pacchetto di installazione per Ubuntu Server LTS (26.04 consigliata, 24.04 supportata),
+anche in una macchina virtuale (es. VMware Workstation Pro con rete "Bridged").
+
+Installazione o aggiornamento (dalla console della VM o via SSH):
+
+    tar -xzf emp-server-VERSIONE.tar.gz
+    cd emp-server-VERSIONE
+    sudo ./installa.sh
+
+Alla fine vengono mostrati:
+  - l'indirizzo del certificato dell'autorità locale (http://IP/emp-ca.crt) e la sua
+    impronta SHA-256, da installare una volta su ogni PC del negozio;
+  - gli indirizzi https:// di EMP;
+  - il codice monouso per il primo setup dell'Amministratore Tecnico.
+
+Gestione:   sudo emp-server stato | indirizzi | codice-setup | backup | certificato
+Recupero:   sudo emp-server recupero-tecnico NOME   (se la Recovery Key è persa)
+Rimozione:  sudo ./disinstalla.sh                    (i dati restano)
+
+Installazione e aggiornamento da GitHub (runner sulla VM, nessuna porta aperta):
+  docs/installazione-da-github.md
+
+Guida completa: docs/ambiente-server-linux.md nel repository edomea/edomea-marketplace.
+Licenza: AGPL-3.0.

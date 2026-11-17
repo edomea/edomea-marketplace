@@ -1,12 +1,11 @@
-# Rust (Edomea Desk)
-/desk/target/
-**/*.rs.bk
-
 # PHP (Edomea Core e plugin)
 /vendor/
 **/vendor/
 composer.phar
 .phpunit.result.cache
+
+# Pacchetti generati (tools/build-server.sh, tools/build-packages.php)
+/dist/
 
 # Configurazioni locali e segreti: mai nel repository
 .env

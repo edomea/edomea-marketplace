@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
+<title>Recupero Amministratore Tecnico — EMP</title>
+<link rel="stylesheet" href="stile.css">
+<script defer src="comune.js"></script>
+<script defer src="recupero.js"></script>
+</head>
+<body>
+<header class="emp-header"><strong>EMP — Recupero accesso</strong><span id="user-badge"></span></header>
+<main class="stretta">
+  <section id="form-box" class="box">
+    <h1>Recupero dell'Amministratore Tecnico</h1>
+    <p>Se hai perso la password del Tecnico, usa la Recovery Key salvata al primo setup. Funziona solo con l'indirizzo https://. In alternativa, sulla console del Server: <code>sudo emp-server recupero-tecnico</code>.</p>
+    <p class="note">Gli amministratori e gli operatori che hanno perso la password devono rivolgersi a chi li gestisce: Tecnico per gli amministratori, amministratore per gli operatori.</p>
+    <form id="recupero" novalidate>
+      <label>Nome utente del Tecnico <input name="username" autocomplete="username" required></label>
+      <label>Recovery Key <input name="recovery_key" autocomplete="off" spellcheck="false" placeholder="EMP-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX" required></label>
+      <label>Nuova password (almeno 12 caratteri) <input name="nuova" type="password" autocomplete="new-password" required></label>
+      <label>Ripeti la nuova password <input name="ripeti" type="password" autocomplete="new-password" required></label>
+      <button type="submit">Reimposta la password</button>
+    </form>
+  </section>
+  <section id="key-box" class="box" hidden></section>
+  <section id="done-box" class="box" hidden>
+    <h2>Password reimpostata</h2>
+    <p>Tutte le sessioni precedenti sono state chiuse e la vecchia Recovery Key non è più valida.</p>
+    <p><a href="index.html">Vai all'accesso</a></p>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

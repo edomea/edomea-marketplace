@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "emp-esempio",
+  "name": "Esempio",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "Plugin dimostrativo: mostra la struttura di un modulo EMP. Non va installato in produzione.",
+  "php": ">=8.2.0",
+  "requires": {
+    "emp-core": ">=0.1.0 <0.2.0"
+  },
+  "class": "Emp\\Plugin\\Esempio\\Module",
+  "autoload": { "Emp\\Plugin\\Esempio\\": "src/" },
+  "table_prefix": "esempio_",
+  "migrations": "migrations",
+  "permissions": ["esempio.leggi"]
+}

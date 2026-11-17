@@ -1,0 +1,67 @@
+# Prepara una release di EMP come BOZZA, con tutti i pacchetti allegati.
+#
+# Si avvia creando un tag vVERSIONE (uguale a server/VERSIONE), anche da GitHub:
+# Releases → Draft a new release → nuovo tag. La release resta in bozza: la
+# pubblica solo il titolare, e solo allora diventa visibile ai Server.
+#
+# Allegati:
+#   emp-server-<versione>.tar.gz (+ .sha256)  pacchetto di EMP Server (installa.sh, Core, catalogo)
+#   emp-packages.json + <plugin>-<versione>.zip  catalogo dei plugin, importabile dal Core
+#                                                 (pagina Plugin → Da GitHub, solo release pubblicate)
+name: Release EMP
+run-name: Release ${{ github.ref_name }} (bozza)
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  bozza:
+    name: Bozza della release ${{ github.ref_name }}
+    if: github.actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Tag e versione coincidono
+        run: |
+          set -euo pipefail
+          VERSIONE=$(tr -d '[:space:]' < server/VERSIONE)
+          if [[ "$GITHUB_REF_NAME" != "v$VERSIONE" ]]; then
+            echo "::error::Il tag $GITHUB_REF_NAME non corrisponde a server/VERSIONE ($VERSIONE): usare v$VERSIONE"
+            exit 1
+          fi
+      - name: Controllo degli script
+        run: shellcheck -x server/installa.sh server/emp-server server/disinstalla.sh tools/build-server.sh
+      - name: Pacchetti
+        run: |
+          set -euo pipefail
+          tools/build-server.sh dist
+          php tools/build-packages.php plugin dist/catalogo
+          ls -l dist dist/catalogo
+      - name: Bozza della release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          {
+            echo "Pacchetti costruiti dal commit \`${GITHUB_SHA::12}\` di \`${GITHUB_REPOSITORY}\`."
+            echo
+            echo "**Bozza**: va controllata e pubblicata dal titolare. Solo le release pubblicate (non bozze, non pre-release)"
+            echo "sono importabili dalla pagina Plugin del Core."
+            echo
+            echo '### Impronte SHA-256'
+            echo '```'
+            (cd dist && sha256sum ./*.tar.gz && cd catalogo && sha256sum ./*)
+            echo '```'
+          } > "$RUNNER_TEMP/note.md"
+          mapfile -t allegati < <(find dist -maxdepth 1 -type f; find dist/catalogo -maxdepth 1 -type f)
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "EMP $GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/note.md" "${allegati[@]}"

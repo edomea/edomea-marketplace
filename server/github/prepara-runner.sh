@@ -65,7 +65,7 @@ come_runner() { (cd "$RUNNER" && sudo -u "$UTENTE" -H "$@"); }
 if ((RIMUOVI)); then
     passo "Rimozione del runner"
     if [[ -f $RUNNER/.runner ]]; then
-        (cd "$RUNNER" && ./svc.sh stop || true; ./svc.sh uninstall || true)
+        (cd "$RUNNER" || exit 1; ./svc.sh stop || true; ./svc.sh uninstall || true)
         token=$(chiedi_token rimozione)
         come_runner ./config.sh remove --token "$token" || echo "Avviso: rimuovere il runner anche da GitHub (Settings → Actions → Runners)."
     fi

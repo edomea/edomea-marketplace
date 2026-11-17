@@ -1,0 +1,83 @@
+# Installa o aggiorna EMP Server sulla VM del negozio, con un pulsante da GitHub.
+#
+# 1. "pacchetto": su un runner di GitHub costruisce emp-server-<versione>.tar.gz dal branch
+#    scelto (Core e plugin del repository) e lo pubblica come artefatto.
+# 2. "installa": sul runner della VM del negozio (etichetta scelta) chiama
+#    emp-installa-da-github, che scarica da solo l'artefatto di QUESTA esecuzione,
+#    ne verifica provenienza e impronte ed esegue installa.sh.
+# La VM si collega a GitHub in uscita: nessuna porta aperta, nessun SSH da Internet.
+# Preparazione della VM: server/github/prepara-runner.sh · guida: docs/installazione-da-github.md
+name: Installa EMP Server
+run-name: Installa EMP Server da ${{ github.ref_name }} su ${{ inputs.server }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      server:
+        description: Etichetta del runner sulla VM del negozio
+        required: true
+        default: emp-server
+      plugin_dimostrativi:
+        description: Includere i plugin dimostrativi nel catalogo
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installa-server-${{ inputs.server }}
+  cancel-in-progress: false
+
+jobs:
+  pacchetto:
+    name: Pacchetto EMP Server
+    # Solo il proprietario del repository può avviare un'installazione.
+    if: github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Controllo degli script
+        run: shellcheck -x server/installa.sh server/emp-server server/disinstalla.sh tools/build-server.sh server/github/emp-installa-da-github server/github/prepara-runner.sh
+      - name: Costruzione del pacchetto
+        env:
+          ESEMPI: ${{ inputs.plugin_dimostrativi && '--con-esempi' || '' }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086
+          tools/build-server.sh dist $ESEMPI
+          {
+            echo "### Pacchetto EMP Server"
+            echo
+            echo "Branch \`${GITHUB_REF_NAME}\` · commit \`${GITHUB_SHA::12}\`"
+            echo
+            echo '```'
+            cat dist/*.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: emp-server-pacchetto
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  installa:
+    name: Installazione sul Server (${{ inputs.server }})
+    needs: pacchetto
+    runs-on: [self-hosted, linux, "${{ inputs.server }}"]
+    # Su GitHub si può richiedere un'approvazione esplicita per questo ambiente.
+    environment: server-negozio
+    timeout-minutes: 45
+    permissions:
+      actions: read
+    steps:
+      # Nessun checkout: sul Server non gira codice del repository, solo il comando verificato.
+      - name: Installazione verificata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.run_id }}
+        run: printf '%s\n' "$GH_TOKEN" | sudo -n /usr/local/sbin/emp-installa-da-github "$RUN_ID"

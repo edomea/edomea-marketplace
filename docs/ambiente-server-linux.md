@@ -77,6 +77,8 @@ All'accensione del PC la VM parte anche senza che nessuno faccia accesso a Windo
 
 ## 2. Installare EMP Server
 
+In alternativa a questa sezione, EMP Server si installa e si aggiorna con un pulsante su GitHub, tramite un runner sulla VM e senza porte aperte: vedi [Installare EMP Server da GitHub](installazione-da-github.md).
+
 ### 2.1 Copiare il pacchetto sulla VM
 
 Il pacchetto si chiama `emp-server-<versione>.tar.gz`. Si trova:

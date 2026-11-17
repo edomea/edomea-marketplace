@@ -155,6 +155,7 @@ return [
     'modules_dir' => '${EMP_MODULES}',
     'catalog_dir' => '${EMP_DATA}/catalogo',
     'local_catalog_dir' => '${EMP_DATA}/catalogo-locale',
+    'server_version' => '${EMP_VERSION}',
 ];
 EOF
     install -m 0640 -o root -g "$EMP_USER" "$tmp" "$EMP_CONFIG"

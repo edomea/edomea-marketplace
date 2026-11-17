@@ -96,6 +96,8 @@ jobs:
           # HTTP rinvia a HTTPS; il certificato del Server è valido per il suo indirizzo IP.
           test "$(code "http://$IP/techadmin/")" = 301
           curl -fsS --cacert "$CA" "$B/api/v1/salute" | tee /dev/stderr | grep -q '"stato":"ok"'
+          # Versioni mostrate nelle pagine: EMP Server (dalla configurazione) e Core.
+          curl -fsS --cacert "$CA" "$B/api/v1/salute" | grep -qF "\"server\":\"$(cat server/VERSIONE)\""
           # Aree separate: /techadmin/ (Tecnico), /admin/ (Amministratore Operativo), /assets/ comuni.
           curl -fsS --cacert "$CA" -o /dev/null "$B/techadmin/setup.html"
           curl -fsS --cacert "$CA" -o /dev/null "$B/admin/"

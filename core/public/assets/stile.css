@@ -45,6 +45,7 @@ form.riga { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
 form.riga label { flex: 1; min-width: 180px; margin: 0; }
 td input { padding: 6px 8px; border: 1px solid #afc4ca; border-radius: 6px; font: inherit; margin-right: 6px; }
 td button { margin-right: 6px; }
+footer.emp-versione { text-align: center; color: #6b7785; font-size: 0.8rem; padding: 24px 16px 16px; }
 section.box h3 { margin: 4px 0 6px; }
 form.riga label.spunta { flex: 0 0 auto; min-width: 0; align-self: center; }
 form.riga label.spunta input { display: inline; width: auto; margin-right: 6px; }

@@ -94,9 +94,15 @@ jobs:
           FP=$(openssl x509 -in "$CA" -noout -fingerprint -sha256 | cut -d= -f2)
           grep -qF "$FP" "$RUNNER_TEMP/installa-1.log"
           # HTTP rinvia a HTTPS; il certificato del Server è valido per il suo indirizzo IP.
-          test "$(code "http://$IP/amministrazione/")" = 301
+          test "$(code "http://$IP/techadmin/")" = 301
           curl -fsS --cacert "$CA" "$B/api/v1/salute" | tee /dev/stderr | grep -q '"stato":"ok"'
-          curl -fsS --cacert "$CA" -o /dev/null "$B/amministrazione/setup.html"
+          # Aree separate: /techadmin/ (Tecnico), /admin/ (Amministratore Operativo), /assets/ comuni.
+          curl -fsS --cacert "$CA" -o /dev/null "$B/techadmin/setup.html"
+          curl -fsS --cacert "$CA" -o /dev/null "$B/admin/"
+          curl -fsS --cacert "$CA" -o /dev/null "$B/assets/accesso.js"
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' --cacert "$CA" "$B/")" = "$B/admin/"
+          # Il vecchio indirizzo porta alle pagine del Tecnico.
+          test "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --cacert "$CA" "$B/amministrazione/setup.html")" = "301 $B/techadmin/setup.html"
           # Servizi solo locali: MariaDB senza rete, PHP-FPM solo su socket.
           if sudo ss -ltnp | grep -E 'mariadbd|mysqld|php-fpm'; then exit 1; fi
           # Primo setup: senza codice rifiutato, con il codice mostrato dall'installazione riuscito.

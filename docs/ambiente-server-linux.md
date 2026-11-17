@@ -89,22 +89,22 @@ Per copiarlo sulla VM ci sono due modi.
 
 **Dal PC Windows** (PowerShell, nella cartella dove si trova il file). `scp` è già incluso in Windows 11:
 ```
-scp emp-server-0.6.0-alpha.2.tar.gz utente@IP-DEL-SERVER:
+scp emp-server-0.6.0-alpha.3.tar.gz utente@IP-DEL-SERVER:
 ```
 
 **Direttamente sulla VM**, se ha accesso a Internet:
 ```
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.2/emp-server-0.6.0-alpha.2.tar.gz
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.2/emp-server-0.6.0-alpha.2.tar.gz.sha256
-sha256sum -c emp-server-0.6.0-alpha.2.tar.gz.sha256
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.3/emp-server-0.6.0-alpha.3.tar.gz
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.3/emp-server-0.6.0-alpha.3.tar.gz.sha256
+sha256sum -c emp-server-0.6.0-alpha.3.tar.gz.sha256
 ```
 
 ### 2.2 Eseguire l'installazione
 
 Sulla VM, dalla console o via SSH (`ssh utente@IP-DEL-SERVER`):
 ```
-tar -xzf emp-server-0.6.0-alpha.2.tar.gz
-cd emp-server-0.6.0-alpha.2
+tar -xzf emp-server-0.6.0-alpha.3.tar.gz
+cd emp-server-0.6.0-alpha.3
 sudo ./installa.sh
 ```
 
@@ -155,11 +155,15 @@ EMP usa un certificato proprio. Il browser lo considera affidabile solo dopo che
 
 ### 3.2 Aprire EMP
 
-Indirizzo: `https://IP-DEL-SERVER/amministrazione/`. Conviene salvarlo nei preferiti di ogni postazione. `sudo emp-server indirizzi` mostra tutti gli indirizzi validi.
+Indirizzi:
+- `https://IP-DEL-SERVER/admin/`: Amministratore Operativo e utenti operativi. Conviene salvarlo nei preferiti di ogni postazione.
+- `https://IP-DEL-SERVER/techadmin/`: solo per l'Amministratore Tecnico (primo setup, plugin, Recovery Key).
+
+L'indirizzo `https://IP-DEL-SERVER/` porta a `/admin/`; il vecchio `/amministrazione/` porta a `/techadmin/`. `sudo emp-server indirizzi` mostra tutti gli indirizzi validi.
 
 ### 3.3 Primo setup dell'Amministratore Tecnico
 
-1. Aprire `https://IP-DEL-SERVER/amministrazione/setup.html`.
+1. Aprire `https://IP-DEL-SERVER/techadmin/setup.html`.
 2. Inserire il **codice di setup** mostrato dall'installazione. È valido 24 ore e si usa una sola volta. Se è scaduto o perso, generarne un altro con `sudo emp-server codice-setup`.
 3. Inserire nome utente, nome e password del Tecnico.
 4. **Scaricare la Recovery Key** e conservarla offline ([accesso e sicurezza](accesso-sicurezza.md)).

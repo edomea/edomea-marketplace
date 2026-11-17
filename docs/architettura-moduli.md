@@ -140,7 +140,7 @@ Le postazioni del negozio **non installano nulla**: usano le pagine e le API del
 
 ## 4-bis. Installazione dei plugin dall'interfaccia web del Core
 
-Pagina: `/amministrazione/plugin.html` del Core. API:
+Pagina: `/techadmin/plugin.html` del Core. API:
 
 | Metodo e percorso | Funzione |
 |---|---|

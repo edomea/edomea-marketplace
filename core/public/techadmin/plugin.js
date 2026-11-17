@@ -111,7 +111,7 @@ async function load() {
       location.replace("index.html");
       return;
     }
-    body.innerHTML = '<tr><td colspan="7">' + esc(e.message) + ' — <a href="index.html">Amministrazione</a></td></tr>';
+    body.innerHTML = '<tr><td colspan="7">' + esc(e.message) + ' — <a href="index.html">Amministratore Tecnico</a></td></tr>';
   }
 }
 

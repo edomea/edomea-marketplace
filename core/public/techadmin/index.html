@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
+<title>Amministratore Tecnico — EMP</title>
+<link rel="stylesheet" href="/assets/stile.css">
+<script defer src="/assets/comune.js"></script>
+<script defer src="/assets/accesso.js"></script>
+</head>
+<body data-area="techadmin">
+<header class="emp-header">
+  <strong>EMP — Amministratore Tecnico</strong>
+  <span><span id="user-badge"></span> <button id="logout" type="button" class="secondario" hidden>Esci</button></span>
+</header>
+<main>
+  <!-- Accesso -->
+  <section id="login-box" class="box stretta" hidden>
+    <h1>Accesso dell'Amministratore Tecnico</h1>
+    <form id="login" novalidate>
+      <label>Nome utente <input name="username" autocomplete="username" required></label>
+      <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Accedi</button>
+    </form>
+    <p class="note">Password dimenticata? Usare la <a href="recupero.html">Recovery Key</a>.
+      Amministratori e utenti operativi accedono da <a href="/admin/">/admin</a>.</p>
+  </section>
+
+  <!-- Cambio password (obbligatorio dopo una password temporanea) -->
+  <section id="password-box" class="box stretta" hidden>
+    <h2 id="password-title">Cambia la tua password</h2>
+    <p id="password-note" class="note"></p>
+    <form id="password" novalidate>
+      <label>Password attuale <input name="attuale" type="password" autocomplete="current-password" required></label>
+      <label>Nuova password (almeno 12 caratteri) <input name="nuova" type="password" autocomplete="new-password" required></label>
+      <label>Ripeti la nuova password <input name="ripeti" type="password" autocomplete="new-password" required></label>
+      <button type="submit">Aggiorna la password</button>
+    </form>
+  </section>
+
+  <!-- Collegamenti -->
+  <section id="links-box" class="box" hidden>
+    <h2>Funzioni</h2>
+    <p id="link-plugin" hidden><a href="plugin.html">Plugin</a> — installazione e aggiornamento dei plugin (solo in HTTPS)</p>
+    <p><a href="#" id="show-password">Cambia la tua password</a></p>
+  </section>
+
+  <!-- Utenti gestiti -->
+  <section id="users-box" class="box" hidden>
+    <h2 id="users-title">Utenti</h2>
+    <table id="users">
+      <thead><tr><th>Utente</th><th>Ruolo</th><th>Stato</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <h3 id="new-title">Nuovo utente</h3>
+    <form id="new-user" class="riga" novalidate>
+      <label>Nome utente <input name="username" autocomplete="off" required></label>
+      <label>Nome e cognome <input name="nome" autocomplete="off" required></label>
+      <label>Password temporanea <input name="password" type="password" autocomplete="new-password" required></label>
+      <button type="submit">Crea</button>
+    </form>
+    <p class="note">La password temporanea va comunicata di persona; l'utente dovrà cambiarla al primo accesso.</p>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

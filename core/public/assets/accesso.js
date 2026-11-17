@@ -1,7 +1,14 @@
 "use strict";
-/* Accesso, cambio password e gestione degli utenti. */
+/*
+ * Accesso, cambio password e gestione degli utenti, per le due aree separate:
+ * - /techadmin/  Amministratore Tecnico (gestisce gli amministratori, plugin, recupero);
+ * - /admin/    Amministratore Operativo e utenti operativi.
+ * Chi entra nell'area sbagliata viene portato in quella del proprio ruolo.
+ */
 
 const $ = (id) => document.getElementById(id);
+const AREA = document.body.dataset.area;
+const AREA_DEL_RUOLO = (ruolo) => (ruolo === "tecnico" ? "techadmin" : "admin");
 const RUOLI = { amministratore: "Amministratore", operatore: "Operatore" };
 let current = null;
 
@@ -19,10 +26,14 @@ async function load() {
     return;
   }
   if (!stato.inizializzato) {
-    location.replace("setup.html");
+    location.replace("/techadmin/setup.html");
     return;
   }
   current = stato.utente;
+  if (current && AREA_DEL_RUOLO(current.ruolo) !== AREA) {
+    location.replace("/" + AREA_DEL_RUOLO(current.ruolo) + "/");
+    return;
+  }
   EMP.showUser(current);
   if (!current) {
     show(["login-box"]);
@@ -34,7 +45,7 @@ async function load() {
     show(["password-box"]);
     return;
   }
-  $("link-plugin").hidden = current.ruolo !== "tecnico";
+  if ($("link-plugin")) $("link-plugin").hidden = current.ruolo !== "tecnico";
   show(["links-box"]);
   await loadUsers();
 }

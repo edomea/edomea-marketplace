@@ -107,7 +107,7 @@ Dettagli: [EMP Server su Ubuntu](ambiente-server-linux.md).
 
 ### Postazioni
 
-Aprire `https://IP-DEL-SERVER/amministrazione/` nel browser e accedere con nome utente e password. Periferiche di cassa da definire con i plugin POS/Scontrino. Nessun terminale per le operazioni ordinarie delle postazioni; la manutenzione del Server si fa con `emp-server`.
+Aprire nel browser `https://IP-DEL-SERVER/admin/` (Amministratore Operativo e utenti operativi) oppure `https://IP-DEL-SERVER/techadmin/` (solo Amministratore Tecnico) e accedere con nome utente e password. Il vecchio indirizzo `/amministrazione/` porta a `/techadmin/`. Periferiche di cassa da definire con i plugin POS/Scontrino. Nessun terminale per le operazioni ordinarie delle postazioni; la manutenzione del Server si fa con `emp-server`.
 
 ---
 

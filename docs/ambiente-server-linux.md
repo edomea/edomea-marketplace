@@ -89,22 +89,22 @@ Per copiarlo sulla VM ci sono due modi.
 
 **Dal PC Windows** (PowerShell, nella cartella dove si trova il file). `scp` è già incluso in Windows 11:
 ```
-scp emp-server-0.6.0-alpha.5.tar.gz utente@IP-DEL-SERVER:
+scp emp-server-0.6.0-alpha.6.tar.gz utente@IP-DEL-SERVER:
 ```
 
 **Direttamente sulla VM**, se ha accesso a Internet:
 ```
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.5/emp-server-0.6.0-alpha.5.tar.gz
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.5/emp-server-0.6.0-alpha.5.tar.gz.sha256
-sha256sum -c emp-server-0.6.0-alpha.5.tar.gz.sha256
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.6/emp-server-0.6.0-alpha.6.tar.gz
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.6/emp-server-0.6.0-alpha.6.tar.gz.sha256
+sha256sum -c emp-server-0.6.0-alpha.6.tar.gz.sha256
 ```
 
 ### 2.2 Eseguire l'installazione
 
 Sulla VM, dalla console o via SSH (`ssh utente@IP-DEL-SERVER`):
 ```
-tar -xzf emp-server-0.6.0-alpha.5.tar.gz
-cd emp-server-0.6.0-alpha.5
+tar -xzf emp-server-0.6.0-alpha.6.tar.gz
+cd emp-server-0.6.0-alpha.6
 sudo ./installa.sh
 ```
 
@@ -182,7 +182,9 @@ Dopo il setup, il Tecnico crea gli amministratori e installa i plugin dalla pagi
 | `/var/lib/emp/moduli/emp-core/` | EMP Core | **root**: il processo web non può modificarlo |
 | `/var/lib/emp/moduli/<plugin>/` | plugin installati dalla pagina web | `emp` |
 | `/var/lib/emp/catalogo/` | plugin installabili, con impronte SHA-256 | root |
-| `/var/lib/emp/backup/` | backup notturni (ultimi 14) | root |
+| `/var/lib/emp/backup/` | backup completi di EMP (ultimi 14) | root |
+| `/opt/emp/server/pacchetto/` | pacchetto della versione installata (incluso nei backup) | root |
+| `/etc/emp/backup-remoto/` | destinazione remota e chiave dei backup (della macchina) | root |
 | `/var/lib/emp/precedenti/` | ultime 5 versioni del Core sostituite | root |
 | `/var/log/emp/`, `/var/log/nginx/emp-*.log` | registri | |
 
@@ -213,7 +215,10 @@ Sul Server, dalla console o via SSH:
 | `sudo emp-server codice-setup` | Nuovo codice per il primo setup |
 | `sudo emp-server recupero-tecnico NOME` | Nuova password del Tecnico e nuova Recovery Key, se la Recovery Key è persa |
 | `sudo emp-server certificato` | Nuovo certificato, per esempio dopo un cambio di indirizzo IP |
-| `sudo emp-server backup` | Backup immediato |
+| `sudo emp-server backup` | Backup completo immediato (e copia remota, se collegata) |
+| `sudo emp-server backup-elenco` | Backup locali e remoti |
+| `sudo emp-server backup-remoto collega gdrive` | Copia cifrata di ogni backup su Google Drive (anche `sftp`, `locale`) |
+| `sudo emp-server ripristina FILE` / `--remoto NOME` | Rimette EMP com'era nel backup, sulla stessa macchina o su una nuova |
 | `sudo emp-server moduli` | Core e plugin installati |
 | `sudo emp-server azzera --nome NOME` | Total reset di un clone del master per un nuovo cliente (vedi sotto) |
 | `sudo emp-server collega-github` | Collega il Server a GitHub per gli aggiornamenti |
@@ -233,24 +238,47 @@ Per aggiornare Ubuntu: `sudo apt update && sudo apt upgrade`. Gli aggiornamenti 
 
 ### Backup e ripristino
 
-Ogni notte, in `/var/lib/emp/backup/emp-AAAAMMGG-HHMMSS/`, viene creata una cartella con:
-- `database.sql.gz`: tutto il database;
-- `configurazione.tar.gz`: configurazione, certificati e moduli;
-- `SHA256SUMS`.
+Il backup riguarda **tutto EMP e solo EMP**.
 
-**I backup sono dentro la VM.** Copiarli regolarmente fuori, su un altro disco o un NAS. Con VMware si possono anche fare *snapshot* della VM spenta.
+**Contiene:**
+- il database;
+- il Core e i plugin installati;
+- i cataloghi dei plugin;
+- il pacchetto della versione di EMP Server in uso, così un ripristino rimette esattamente quella versione.
 
-Copia da Windows:
-```
-scp -r utente@IP-DEL-SERVER:/var/lib/emp/backup/emp-AAAAMMGG-HHMMSS .
-```
-La cartella dei backup è riservata a root: prima copiarla in una cartella dell'utente con `sudo cp -r …` e assegnarla con `sudo chown -R utente …`.
+**Non contiene ciò che appartiene alla macchina:** Ubuntu, nome host, chiavi SSH, certificato HTTPS e sua autorità, collegamento a GitHub, destinazione dei backup remoti.
 
-**Ripristino del database**, su un Server installato:
+**Quando parte:**
+- ogni notte alle 02:30 (si conservano gli ultimi 14);
+- **automaticamente prima di ogni aggiornamento**, da `installa.sh` o dal tasto *Installa EMP Server*. Se il backup non riesce, l'aggiornamento non parte;
+- a mano, con `sudo emp-server backup`.
+
+Ogni backup è un solo file, `/var/lib/emp/backup/emp-backup-<server>-<AAAAMMGG-HHMMSS>[-etichetta].tar`, con le impronte SHA-256 di ogni parte. `sudo emp-server backup-elenco` mostra quelli presenti sulla macchina e sulla destinazione remota.
+
+**Copia remota cifrata (Google Drive).** Si collega una volta sola. Dal PC apri una connessione SSH con il tunnel per l'accesso a Google:
 ```
-sudo sha256sum -c SHA256SUMS
-gunzip -c database.sql.gz | sudo mariadb
+ssh -L 53682:127.0.0.1:53682 utente@IP-DEL-SERVER
+sudo emp-server backup-remoto collega gdrive
 ```
+Poi apri in Chrome il link `http://127.0.0.1:53682/…` che compare e accedi con l'account Google dei backup.
+- **Accesso limitato:** EMP vede solo i file che crea lui, nella cartella `EMP-backup` di Drive.
+- **Cifratura:** ogni backup viene copiato su Drive cifrato con la **chiave dei backup**, mostrata una sola volta alla fine del collegamento. Va salvata fuori dalla VM (gestore di password, foglio in cassaforte): senza chiave i backup remoti non si possono aprire. Per rivederla: `sudo emp-server backup-remoto chiave`.
+- **Conservazione:** su Drive restano gli ultimi 30 backup di ogni server.
+- **Altre destinazioni:** `collega sftp utente@host[:porta]` oppure `collega locale /percorso`, per un disco USB o un NAS montato.
+
+**Ripristino sulla stessa macchina**, per esempio dopo un aggiornamento andato male:
+```
+sudo emp-server backup-elenco
+sudo emp-server ripristina /var/lib/emp/backup/emp-backup-…-prima-di-0.6.0-alpha.6.tar
+```
+Chiede di scrivere `RIPRISTINA`. Prima di sostituire i dati salva lo stato attuale (backup `…-prima-del-ripristino`). Se il backup è di un'altra versione, reinstalla quella versione dal pacchetto contenuto nel backup.
+
+**Ripristino su una macchina nuova** ("new installation"):
+1. Ubuntu Server nuovo, EMP Server installato con `installa.sh` o con il tasto su GitHub. La macchina ha il suo nome e il suo certificato.
+2. `sudo emp-server backup-remoto collega gdrive --chiave CHIAVE-DEI-BACKUP`
+3. `sudo emp-server backup-elenco`, poi `sudo emp-server ripristina --remoto emp-backup-….tar`
+
+Tornano database, utenti, Core e plugin. Il certificato resta quello della macchina nuova, come in una nuova installazione: va installato sulle postazioni come al primo avvio.
 
 ### Nuovo cliente white label: master → clone → azzera
 
@@ -302,6 +330,6 @@ Una VM **master** resta sempre aggiornata all'ultima release e in stato di fabbr
 
 - Pacchetto **non firmato**: l'integrità si basa sulle impronte SHA-256, sulla release GitHub in HTTPS e sull'attestazione di provenienza della CI.
 - Un solo Server per negozio; nessuna replica.
-- I backup restano nella VM finché non vengono copiati fuori; non sono ancora cifrati, perché la *Master Recovery Key* è rinviata.
+- Senza destinazione remota collegata i backup restano solo nella VM. I backup locali non sono cifrati (cartella riservata a root); la copia remota sì, con la chiave dei backup.
 - Telefoni e tablet: l'installazione dell'autorità locale su Android e iOS va documentata.
 - EMP Web, cioè il Core su hosting o VPS pubblico con certificato pubblico, è da progettare.

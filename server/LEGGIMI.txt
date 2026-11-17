@@ -16,7 +16,7 @@ Alla fine vengono mostrati:
   - gli indirizzi https:// di EMP;
   - il codice monouso per il primo setup dell'Amministratore Tecnico.
 
-Gestione:   sudo emp-server stato | indirizzi | codice-setup | backup | certificato
+Gestione:   sudo emp-server stato | indirizzi | codice-setup | backup | ripristina | backup-remoto | certificato
 Recupero:   sudo emp-server recupero-tecnico NOME   (se la Recovery Key è persa)
 Nuovo cliente (clone della VM master):
             sudo emp-server azzera --nome NOME     (total reset: dati, identità, nome)

@@ -81,7 +81,7 @@ install_packages() {
     apt-get install -y -q --no-install-recommends \
         nginx mariadb-server mariadb-client \
         php-fpm php-cli php-mysql php-mbstring php-zip php-curl \
-        openssl ca-certificates curl ufw unattended-upgrades lsb-release
+        openssl ca-certificates curl ufw unattended-upgrades lsb-release rclone
     # In una macchina virtuale VMware: strumenti per lo spegnimento ordinato insieme al PC che la ospita.
     if [[ $(systemd-detect-virt 2>/dev/null || true) == vmware ]]; then
         apt-get install -y -q --no-install-recommends open-vm-tools
@@ -281,6 +281,23 @@ install_programs() {
         install -m 0755 "$SOURCE_DIR/github/prepara-runner.sh" "$SOURCE_DIR/github/emp-installa-da-github" "$EMP_HOME/github/"
     fi
     ln -sfn "$EMP_HOME/emp-server" /usr/local/sbin/emp-server
+    # Copia del pacchetto installato: va nei backup, così un ripristino rimette questa versione.
+    install -d -m 0700 -o root -g root "$EMP_PACKAGE_DIR"
+    find "$EMP_PACKAGE_DIR" -mindepth 1 -maxdepth 1 -name 'emp-server-*.tar.gz' ! -name "emp-server-${EMP_VERSION}.tar.gz" -delete
+    tar -C "$(dirname "$SOURCE_DIR")" --transform "s#^$(basename "$SOURCE_DIR")#emp-server-${EMP_VERSION}#" \
+        -czf "$EMP_PACKAGE_DIR/emp-server-${EMP_VERSION}.tar.gz" "$(basename "$SOURCE_DIR")"
+}
+
+# Prima di aggiornare un Server già in uso: backup completo di EMP. Se non riesce, niente aggiornamento.
+backup_before_update() {
+    [[ ${EMP_RIPRISTINO:-} == 1 ]] && return 0   # ripristino in corso: il backup è già stato fatto
+    [[ -f $EMP_MODULES/emp-core/emp-module.json ]] || return 0
+    emp_database_exists || return 0
+    step "Backup di EMP prima dell'aggiornamento"
+    local rc=0
+    cmd_backup --etichetta "prima-di-${EMP_VERSION}" || rc=$?
+    # 3 = copia remota non riuscita: il backup locale è valido e l'aggiornamento prosegue.
+    ((rc == 0 || rc == 3)) || die "backup non riuscito: aggiornamento annullato, nessuna modifica eseguita"
 }
 
 # ---------------------------------------------------------------- 8. verifica e riepilogo
@@ -325,13 +342,14 @@ summary() {
         echo "    Se scade o si perde: sudo emp-server codice-setup"
     fi
     echo
-    echo " Gestione: sudo emp-server stato | backup | certificato | recupero-tecnico NOME | collega-github"
+    echo " Gestione: sudo emp-server stato | backup | ripristina | backup-remoto | certificato | collega-github"
     echo
 }
 
 main() {
     check_system
     check_package
+    backup_before_update
     install_packages
     create_layout
     install_programs

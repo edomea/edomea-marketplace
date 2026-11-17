@@ -15,7 +15,8 @@ use Emp\Core\Support\Clock;
  * Il file restituisce un array PHP:
  *   ['dsn' => 'mysql:unix_socket=…;dbname=emp', 'user' => …, 'password' => …,
  *    'prefix' => 'emp_', 'timezone' => 'Europe/Rome', 'modules_dir' => '/…/modules',
- *    'catalog_dir' => '/…/catalogo']  // facoltativo: pacchetti dei plugin installabili dal web
+ *    'catalog_dir' => '/…/catalogo',          // facoltativo: catalogo di EMP Server (sola lettura)
+ *    'local_catalog_dir' => '/…/catalogo-locale']  // facoltativo: pacchetti caricati a mano o importati da GitHub
  */
 final class Config
 {
@@ -71,12 +72,14 @@ final class Config
     public function kernel(): Kernel
     {
         $catalog = $this->values['catalog_dir'] ?? null;
+        $local = $this->values['local_catalog_dir'] ?? null;
 
         return new Kernel(
             $this->modulesDir(),
             $this->installer(),
             $this->clock(),
             is_string($catalog) && $catalog !== '' ? $catalog : null,
+            is_string($local) && $local !== '' ? $local : null,
         );
     }
 }

@@ -81,7 +81,7 @@ install_packages() {
     apt-get update -q
     apt-get install -y -q --no-install-recommends \
         nginx mariadb-server mariadb-client \
-        php-fpm php-cli php-mysql php-mbstring php-zip \
+        php-fpm php-cli php-mysql php-mbstring php-zip php-curl \
         openssl ca-certificates curl ufw unattended-upgrades lsb-release
     # In una macchina virtuale VMware: strumenti per lo spegnimento ordinato insieme al PC che la ospita.
     if [[ $(systemd-detect-virt 2>/dev/null || true) == vmware ]]; then
@@ -118,6 +118,8 @@ create_layout() {
     # ma non può modificare, rinominare o cancellare il Core (di proprietà di root).
     install -d -m 1775 -o root -g "$EMP_USER" "$EMP_MODULES"
     install -d -m 0755 -o root -g root "$EMP_DATA/catalogo"
+    # Catalogo locale del Core: plugin caricati a mano dal Tecnico o importati da una release GitHub.
+    install -d -m 0750 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/catalogo-locale"
     install -d -m 0700 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/tmp"
     install -d -m 0700 -o root -g root "$EMP_BACKUP"
     install -d -m 0750 -o "$EMP_USER" -g adm "$EMP_LOGS"
@@ -163,6 +165,7 @@ return [
     'timezone' => 'Europe/Rome',
     'modules_dir' => '${EMP_MODULES}',
     'catalog_dir' => '${EMP_DATA}/catalogo',
+    'local_catalog_dir' => '${EMP_DATA}/catalogo-locale',
 ];
 EOF
     install -m 0640 -o root -g "$EMP_USER" "$tmp" "$EMP_CONFIG"

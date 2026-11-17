@@ -117,7 +117,7 @@ Ci sono due indici distinti, generati da `tools/build-packages.php`:
 | Pacchetto del Core (`build-packages.php core`) | solo `emp-core` | `pacchetti/` del pacchetto EMP Server |
 | Catalogo plugin (`build-packages.php plugin`) | tutti i plugin sviluppati | `catalogo/` del pacchetto EMP Server → `catalog_dir` del Core |
 
-Entrambi sono generati dalla CI e pubblicati nella release GitHub approvata. In una fase successiva l'indice sarà firmato; fino ad allora la sua integrità dipende dal canale (release GitHub su HTTPS, attestazione di provenienza, `SHA256SUMS` del pacchetto EMP Server controllato da `installa.sh`).
+Entrambi sono generati dalla CI e allegati alla release GitHub, che il titolare approva pubblicandola (vedi *Release su GitHub*, §4-bis). In una fase successiva l'indice sarà firmato; fino ad allora la sua integrità dipende dal canale (release GitHub su HTTPS, attestazione di provenienza, `SHA256SUMS` del pacchetto EMP Server controllato da `installa.sh`).
 
 ---
 
@@ -155,6 +155,44 @@ Installazione di un plugin:
 4. esegue le migrazioni nell'ordine del piano, registrando l'esecutore.
 
 **Accesso.** La gestione dei plugin è riservata all'**Amministratore Tecnico** autenticato ([accesso e sicurezza](accesso-sicurezza.md)) e risponde **solo in HTTPS** (o a richieste fatte sul Server stesso). In HTTP le altre postazioni ricevono `403`. Nella tracciabilità l'esecutore è il nome utente del Tecnico.
+
+### Fonti dei pacchetti
+
+I plugin si installano **a mano dal Core**: il Tecnico sceglie il plugin e preme *Installa*. I pacchetti possono arrivare da tre fonti; per ogni plugin vale la versione più recente, e a parità di versione quella di EMP Server. La colonna *Origine* della pagina mostra da dove viene ciascun pacchetto.
+
+| Fonte | Cartella | Chi la riempie | Rete |
+|---|---|---|---|
+| Catalogo di EMP Server | `catalog_dir` (`/var/lib/emp/catalogo`, di root) | `installa.sh`, dal pacchetto EMP Server | no |
+| **Caricamento manuale** | `local_catalog_dir` (`/var/lib/emp/catalogo-locale`, utente `emp`) | il Tecnico, dal browser (*Carica un pacchetto*) | no |
+| **GitHub, facoltativa** | `local_catalog_dir` | il Tecnico, importando una release pubblicata (*Da GitHub*) | solo durante l'importazione |
+
+Caricare o importare **non installa**: il pacchetto entra nel catalogo locale e il plugin compare nell'elenco come installabile o aggiornabile.
+
+**Caricamento manuale** (`POST /api/v1/plugin/carica`, corpo `application/zip`, massimo 64 MB). Il pacchetto viene rifiutato se:
+- ha più di una cartella alla radice o una cartella diversa dall'`id` del plugin;
+- contiene percorsi con `..`, percorsi assoluti o collegamenti simbolici;
+- il manifest non è valido, oppure il pacchetto è il Core;
+- l'impronta SHA-256 non coincide con quella indicata (campo facoltativo, intestazione `X-EMP-Impronta`);
+- la stessa versione è già presente con un contenuto diverso: per cambiare un plugin si aumenta la versione.
+
+Il catalogo locale tiene una sola versione per plugin. *Togli pacchetto* (`POST /api/v1/plugin/{id}/rimuovi-pacchetto`) lo toglie dal catalogo, ma il plugin installato resta.
+
+**Sorgente GitHub** (`GET/POST /api/v1/plugin/github`, `GET /api/v1/plugin/github/release`, `POST /api/v1/plugin/github/importa`):
+- **disattivata di predefinito**; la attiva il Tecnico indicando il repository (predefinito `edomea/edomea-marketplace`). Disattivata, il Core non contatta mai GitHub;
+- legge **solo le release pubblicate**: bozze e pre-release sono escluse, quindi entra solo ciò che il titolare ha approvato pubblicandolo;
+- la release deve allegare `emp-packages.json` e i pacchetti che elenca. Tutti i pacchetti vengono scaricati e verificati (SHA-256 dell'indice e manifest) **prima** di entrare nel catalogo locale: se uno non è valido, non entra nessuno;
+- connessioni solo HTTPS verso i domini di GitHub, anche nei reindirizzamenti, senza credenziali (estensione `php-curl`; `allow_url_fopen` resta disattivato);
+- connessione solo quando il Tecnico preme *Mostra le release* o *Importa*.
+
+Caricamenti, importazioni, rimozioni e modifiche della sorgente GitHub sono registrati nella tracciabilità (`core_audit`), con versione, impronta e origine.
+
+### Release su GitHub
+
+Il workflow `.github/workflows/release.yml` parte con un tag `vVERSIONE`, uguale a `server/VERSIONE`, e crea una release **in bozza** con allegati:
+- il pacchetto `emp-server-<versione>.tar.gz` con il suo `.sha256`;
+- il catalogo dei plugin, cioè `emp-packages.json` e i file ZIP.
+
+La bozza non è visibile ai Server finché il titolare non la **pubblica**: pubblicare la release è l'atto di approvazione. Per aggiornare EMP Server dalla release si usa il pacchetto allegato con `sudo ./installa.sh`, oppure il workflow *Installa EMP Server* ([installazione da GitHub](installazione-da-github.md)).
 
 ---
 

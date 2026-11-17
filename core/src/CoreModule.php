@@ -15,6 +15,7 @@ use Emp\Core\Module\Manifest;
 use Emp\Core\Module\ManifestException;
 use Emp\Core\Module\ModuleInterface;
 use Emp\Core\Module\ResolutionException;
+use Emp\Core\Plugin\LocalCatalog;
 use Emp\Core\Plugin\PackageException;
 
 /**
@@ -43,6 +44,15 @@ use Emp\Core\Plugin\PackageException;
  *   GET  /api/v1/plugin
  *   POST /api/v1/plugin/{id}/installa
  *   POST /api/v1/plugin/{id}/disinstalla
+ *   POST /api/v1/plugin/carica                 pacchetto ZIP nel corpo (application/zip) → catalogo locale;
+ *                                              intestazione facoltativa X-EMP-Impronta: SHA-256 atteso
+ *   POST /api/v1/plugin/{id}/rimuovi-pacchetto toglie il pacchetto dal catalogo locale
+ *
+ * Sorgente GitHub facoltativa (solo Tecnico, solo HTTPS; vedi docs/architettura-moduli.md)
+ *   GET  /api/v1/plugin/github                 impostazioni (attiva, repository)
+ *   POST /api/v1/plugin/github                 {attiva, repository}
+ *   GET  /api/v1/plugin/github/release         release pubblicate del repository
+ *   POST /api/v1/plugin/github/importa         {tag}: plugin della release → catalogo locale
  */
 final class CoreModule implements ModuleInterface
 {
@@ -167,6 +177,128 @@ final class CoreModule implements ModuleInterface
 
             return Response::json(['ok' => true, 'operazioni' => ['Plugin rimosso dal registro. I dati non sono stati cancellati.']]);
         }));
+
+        // ---- Plugin: caricamento manuale del pacchetto --------------------------------
+        $r->add('POST', '/api/v1/plugin/carica', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($kernel, $access, $q): Response {
+            $user = self::requireUser($access(), $q, false, Role::TECNICO);
+            $type = strtolower(trim(explode(';', (string) $q->header('content-type'))[0]));
+            if (!in_array($type, ['application/zip', 'application/x-zip-compressed', 'application/octet-stream'], true)) {
+                throw new PackageException('Inviare il pacchetto ZIP del plugin');
+            }
+            $plugins = $kernel->plugins();
+            $local = $plugins->localCatalog();
+            if ($local === null || !$local->isWritable()) {
+                throw new PackageException('Catalogo locale non disponibile: rieseguire l\'installazione di EMP Server');
+            }
+            $tmp = $local->dir() . DIRECTORY_SEPARATOR . '.caricamento-' . bin2hex(random_bytes(6));
+            try {
+                self::receive($q, $tmp, LocalCatalog::MAX_UPLOAD_BYTES);
+                $entry = $plugins->upload($tmp, 'Caricato a mano da ' . $user->username, $q->header('x-emp-impronta'));
+            } finally {
+                @unlink($tmp);
+            }
+            if ($entry['nuovo']) {
+                $kernel->audit()->record($user->username, 'emp-core', 'plugin.pacchetto_caricato', 'plugin', $entry['id'], 0, null, self::summary($entry));
+            }
+
+            return Response::json(['ok' => true, 'pacchetto' => $entry, 'operazioni' => [$entry['nuovo']
+                ? sprintf('Pacchetto %s %s aggiunto al catalogo locale (SHA-256 %s). Installarlo dall\'elenco.', $entry['id'], $entry['version'], $entry['sha256'])
+                : sprintf('Pacchetto %s %s già presente nel catalogo locale.', $entry['id'], $entry['version'])]]);
+        }));
+
+        $r->add('POST', '/api/v1/plugin/{id}/rimuovi-pacchetto', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($kernel, $access, $q): Response {
+            $user = self::requireUser($access(), $q, false, Role::TECNICO);
+            if (!$kernel->plugins()->removePackage($q->param('id'))) {
+                return Response::error(404, 'Pacchetto non presente nel catalogo locale');
+            }
+            $kernel->audit()->record($user->username, 'emp-core', 'plugin.pacchetto_rimosso', 'plugin', $q->param('id'));
+
+            return Response::json(['ok' => true, 'operazioni' => ['Pacchetto tolto dal catalogo locale. Il plugin eventualmente installato resta installato.']]);
+        }));
+
+        // ---- Plugin: sorgente GitHub facoltativa ---------------------------------------
+        $github = static function () use ($kernel) {
+            return $kernel->githubSource() ?? throw new PackageException('Catalogo locale non disponibile: rieseguire l\'installazione di EMP Server');
+        };
+
+        $r->add('GET', '/api/v1/plugin/github', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($github, $access, $q): Response {
+            self::requireUser($access(), $q, false, Role::TECNICO);
+
+            return Response::json($github()->settings() + ['curl' => \Emp\Core\Plugin\CurlHttpClient::isAvailable()]);
+        }));
+
+        $r->add('POST', '/api/v1/plugin/github', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($kernel, $github, $access, $q): Response {
+            $user = self::requireUser($access(), $q, false, Role::TECNICO);
+            $source = $github();
+            $before = $source->settings();
+            $active = ($q->json()['attiva'] ?? false) === true;
+            $repository = $q->input('repository') !== '' ? $q->input('repository') : $before['repository'];
+            $after = $source->saveSettings($active, $repository, $user->username, $kernel->clock->now());
+            $kernel->audit()->record(
+                $user->username,
+                'emp-core',
+                'plugin.sorgente_github',
+                'impostazione',
+                'sorgente-github',
+                0,
+                json_encode(['attiva' => $before['attiva'], 'repository' => $before['repository']], JSON_UNESCAPED_SLASHES) ?: null,
+                json_encode(['attiva' => $after['attiva'], 'repository' => $after['repository']], JSON_UNESCAPED_SLASHES) ?: null,
+            );
+
+            return Response::json(['ok' => true, 'impostazioni' => $after, 'operazioni' => [$active
+                ? "Sorgente GitHub attiva: {$after['repository']} (solo release pubblicate)."
+                : 'Sorgente GitHub disattivata.']]);
+        }));
+
+        $r->add('GET', '/api/v1/plugin/github/release', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($github, $access, $q): Response {
+            self::requireUser($access(), $q, false, Role::TECNICO);
+
+            return Response::json(['release' => $github()->releases()]);
+        }));
+
+        $r->add('POST', '/api/v1/plugin/github/importa', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($kernel, $github, $access, $q): Response {
+            $user = self::requireUser($access(), $q, false, Role::TECNICO);
+            $imported = $github()->import($q->input('tag'));
+            $log = [];
+            foreach ($imported as $entry) {
+                if ($entry['nuovo']) {
+                    $kernel->audit()->record($user->username, 'emp-core', 'plugin.pacchetto_importato', 'plugin', $entry['id'], 0, null, self::summary($entry));
+                }
+                $log[] = sprintf('%s %s %s', $entry['id'], $entry['version'], $entry['nuovo'] ? 'aggiunto al catalogo locale' : 'già presente');
+            }
+            $log[] = 'Installare o aggiornare i plugin dall\'elenco.';
+
+            return Response::json(['ok' => true, 'pacchetti' => $imported, 'operazioni' => $log]);
+        }));
+    }
+
+    /** Copia il corpo della richiesta in un file, con un limite reale sui byte. */
+    private static function receive(Request $q, string $dest, int $maxBytes): void
+    {
+        $in = $q->openBody();
+        $out = @fopen($dest, 'xb');
+        if ($out === false) {
+            fclose($in);
+            throw new PackageException('Impossibile ricevere il pacchetto');
+        }
+        try {
+            $written = stream_copy_to_stream($in, $out, $maxBytes + 1);
+        } finally {
+            fclose($in);
+            fclose($out);
+        }
+        if ($written === false || $written === 0) {
+            throw new PackageException('Nessun pacchetto ricevuto');
+        }
+        if ($written > $maxBytes) {
+            throw new PackageException(sprintf('Pacchetto troppo grande (massimo %d MB)', intdiv($maxBytes, 1048576)));
+        }
+    }
+
+    /** @param array<string, mixed> $entry */
+    private static function summary(array $entry): ?string
+    {
+        return json_encode(['versione' => $entry['version'], 'sha256' => $entry['sha256'], 'origine' => $entry['origine']], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?: null;
     }
 
     /**

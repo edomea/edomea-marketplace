@@ -44,6 +44,8 @@ final class Kernel
         private readonly ?string $catalogDir = null,
         private readonly ?string $localCatalogDir = null,
         private readonly ?HttpClient $http = null,
+        /** Versione di EMP Server che ha installato il Core (null fuori da EMP Server). */
+        public readonly ?string $serverVersion = null,
     ) {
         $this->router = new Router();
         $this->autoloader = new Psr4Autoloader();

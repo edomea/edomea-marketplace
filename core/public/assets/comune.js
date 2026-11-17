@@ -5,6 +5,19 @@
  */
 
 const EMP = {
+  /** Versioni installate in fondo a ogni pagina (EMP Server e Core). */
+  async showVersion() {
+    const footer = document.createElement("footer");
+    footer.className = "emp-versione";
+    document.body.appendChild(footer);
+    try {
+      const s = await EMP.api("salute");
+      footer.textContent = (s.server ? "EMP Server " + s.server + " · " : "") + "Core " + s.core;
+    } catch (_) {
+      footer.textContent = "Versione non disponibile";
+    }
+  },
+
   /** Chiamata alle API del Core. Le richieste che modificano portano X-EMP-Richiesta. */
   async api(path, method = "GET", body = null) {
     const opts = { method, headers: { Accept: "application/json" }, credentials: "same-origin" };
@@ -115,3 +128,5 @@ const EMP = {
     container.append(h, code, warn, dl, label, done);
   },
 };
+
+document.addEventListener("DOMContentLoaded", () => EMP.showVersion());

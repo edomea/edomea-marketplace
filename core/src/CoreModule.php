@@ -67,6 +67,7 @@ final class CoreModule implements ModuleInterface
         $r->add('GET', '/api/v1/salute', $id, static fn (): Response => Response::json([
             'stato' => 'ok',
             'core' => (string) $manifest->version,
+            'server' => $kernel->serverVersion,
             'ora' => $kernel->clock->now()->format(\DateTimeInterface::ATOM),
         ]));
 

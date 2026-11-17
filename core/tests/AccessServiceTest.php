@@ -58,7 +58,7 @@ final class AccessServiceTest extends TestCase
         $this->pdo = new \PDO('sqlite::memory:');
         $this->clock = new FixedClock();
         $this->installer = new Installer($this->pdo, $this->clock, 'emp_');
-        $this->installer->install((new Resolver())->resolve((new Registry($this->modules))->discover()), 'desk');
+        $this->installer->install((new Resolver())->resolve((new Registry($this->modules))->discover()), 'installer');
         $this->access = new AccessService($this->pdo, 'emp_core_', $this->clock);
     }
 
@@ -102,6 +102,63 @@ final class AccessServiceTest extends TestCase
         $stored = (string) $this->pdo->query("SELECT value FROM emp_core_settings WHERE name = 'tecnico_recovery_key'")->fetchColumn();
         self::assertTrue(!str_contains($stored, substr($key, 4, 5)) && str_starts_with($stored, '$'));
         $this->expectAccessError(409, fn () => $this->access->setupTecnico('altro', 'Altro', 'Altra-Password-2026'));
+    }
+
+    public function testSetupCodeFromAnotherWorkstation(): void
+    {
+        // Da un'altra postazione senza codice generato: rifiutato.
+        $this->expectAccessError(401, fn () => $this->access->setupTecnico('tecnico', 'T', self::PWD_TECNICO, '', true, '192.168.1.20'));
+
+        $code = $this->access->createSetupCode('console');
+        self::assertTrue((bool) preg_match('/^EMP(-[A-Z2-9]{5}){3}$/', $code), $code);
+        self::assertFalse(str_contains((string) $this->pdo->query("SELECT value FROM emp_core_settings WHERE name = 'codice_setup'")->fetchColumn(), substr($code, 4, 5)));
+
+        // Codice errato e codice assente: rifiutati, anche per richieste dal computer stesso.
+        $this->expectAccessError(401, fn () => $this->access->setupTecnico('tecnico', 'T', self::PWD_TECNICO, 'EMP-AAAAA-BBBBB-CCCCC', true, '192.168.1.20'));
+        $this->expectAccessError(401, fn () => $this->access->setupTecnico('tecnico', 'T', self::PWD_TECNICO));
+        self::assertFalse($this->access->isInitialized());
+
+        // Codice corretto (scritto in minuscolo e senza trattini): setup riuscito e codice consumato.
+        $this->access->setupTecnico('tecnico', 'T', self::PWD_TECNICO, strtolower(str_replace('-', ' ', $code)), true, '192.168.1.20');
+        self::assertTrue($this->access->isInitialized());
+        self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM emp_core_settings WHERE name = 'codice_setup'")->fetchColumn());
+        // Dopo il setup non si generano più codici.
+        $this->expectAccessError(409, fn () => $this->access->createSetupCode('console'));
+    }
+
+    public function testSetupCodeExpiresAndIsReplaced(): void
+    {
+        $first = $this->access->createSetupCode('console');
+        $second = $this->access->createSetupCode('console');
+        // Il nuovo codice annulla il precedente.
+        $this->expectAccessError(401, fn () => $this->access->setupTecnico('tecnico', 'T', self::PWD_TECNICO, $first, true, '10.0.0.2'));
+        $this->clock->advance('+' . (AccessService::SETUP_CODE_HOURS * 60 + 1) . ' minutes');
+        $this->expectAccessError(401, fn () => $this->access->setupTecnico('tecnico', 'T', self::PWD_TECNICO, $second, true, '10.0.0.2'));
+        self::assertFalse($this->access->isInitialized());
+    }
+
+    public function testSetupCodeAttemptsAreLimited(): void
+    {
+        $code = $this->access->createSetupCode('console');
+        for ($i = 0; $i < AccessService::MAX_FAILURES_PER_USER; $i++) {
+            $this->expectAccessError(401, fn () => $this->access->setupTecnico('tecnico', 'T', self::PWD_TECNICO, 'EMP-AAAAA-BBBBB-CCCCC', true, '10.0.0.' . $i));
+        }
+        $this->expectAccessError(429, fn () => $this->access->setupTecnico('tecnico', 'T', self::PWD_TECNICO, $code, true, '10.0.0.99'));
+    }
+
+    public function testConsoleResetTecnico(): void
+    {
+        $oldKey = $this->setupTecnico();
+        [$token] = $this->access->login('tecnico', self::PWD_TECNICO, '127.0.0.1');
+        $newKey = $this->access->consoleResetTecnico('tecnico', 'Nuova-Password-Console-26', 'console');
+        self::assertNotSame($oldKey, $newKey);
+        self::assertNull($this->access->userForToken($token));
+        $this->loginAs('tecnico', 'Nuova-Password-Console-26');
+        // La vecchia Recovery Key non vale più, la nuova sì.
+        $this->expectAccessError(401, fn () => $this->access->recoverTecnico('tecnico', $oldKey, 'Altra-Password-Sicura-1', '127.0.0.1'));
+        $this->access->recoverTecnico('tecnico', $newKey, 'Altra-Password-Sicura-1', '127.0.0.1');
+        $this->expectAccessError(404, fn () => $this->access->consoleResetTecnico('nessuno', 'Nuova-Password-Console-26', 'console'));
+        $this->expectAccessError(422, fn () => $this->access->consoleResetTecnico('tecnico', 'corta', 'console'));
     }
 
     public function testPasswordRules(): void
@@ -294,13 +351,20 @@ final class AccessServiceTest extends TestCase
         $post = static fn (string $path, array $body, array $h = [], string $ip = '127.0.0.1'): Request => new Request('POST', $path, $h + $local, $ip, (string) json_encode($body));
 
         $state = json_decode($kernel->handle(new Request('GET', '/api/v1/accesso/stato'))->body, true);
-        self::assertSame(['inizializzato' => false, 'utente' => null], $state);
+        self::assertSame(['inizializzato' => false, 'utente' => null, 'protetto' => false, 'codice_setup' => true], $state);
 
-        // Il primo setup non si può fare da un'altra postazione né senza intestazione anti-CSRF.
+        // Il primo setup da un'altra postazione: non in HTTP, non senza intestazione anti-CSRF, non senza codice.
         $body = ['username' => 'tecnico', 'nome' => 'Mario', 'password' => self::PWD_TECNICO];
-        self::assertSame(403, $kernel->handle($post('/api/v1/accesso/setup', $body, [], '192.168.1.30'))->status);
-        self::assertSame(403, $kernel->handle(new Request('POST', '/api/v1/accesso/setup', ['host' => 'localhost'], '127.0.0.1', (string) json_encode($body)))->status);
-        $setup = $kernel->handle($post('/api/v1/accesso/setup', $body));
+        $lan = ['host' => '192.168.1.10', 'x-emp-https' => '1'];
+        self::assertSame(403, $kernel->handle($post('/api/v1/accesso/setup', $body, ['host' => '192.168.1.10'], '192.168.1.30'))->status);
+        self::assertSame(403, $kernel->handle(new Request('POST', '/api/v1/accesso/setup', $lan, '192.168.1.30', (string) json_encode($body)))->status);
+        self::assertSame(401, $kernel->handle($post('/api/v1/accesso/setup', $body, $lan, '192.168.1.30'))->status);
+        $httpsState = json_decode($kernel->handle(new Request('GET', '/api/v1/accesso/stato', $lan, '192.168.1.30'))->body, true);
+        self::assertTrue($httpsState['protetto'] && $httpsState['codice_setup']);
+
+        // Con il codice generato sulla console del Server: riuscito.
+        $code = $kernel->access()->createSetupCode('console');
+        $setup = $kernel->handle($post('/api/v1/accesso/setup', $body + ['codice' => $code], $lan, '192.168.1.30'));
         self::assertSame(200, $setup->status, $setup->body);
         self::assertTrue(str_starts_with(json_decode($setup->body, true)['recovery_key'], 'EMP-'));
         self::assertSame(409, $kernel->handle($post('/api/v1/accesso/setup', $body))->status);

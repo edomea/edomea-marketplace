@@ -1,0 +1,36 @@
+name: Segnala un problema
+description: Qualcosa non funziona come previsto
+labels: [problema]
+body:
+  - type: input
+    id: versione
+    attributes:
+      label: Versione
+      description: Ad esempio EMP Server 0.6.0-alpha.1 (sudo emp-server stato)
+    validations:
+      required: true
+  - type: dropdown
+    id: componente
+    attributes:
+      label: Componente
+      options: [EMP Server (installazione), EMP Core, Plugin, Documentazione]
+    validations:
+      required: true
+  - type: textarea
+    id: descrizione
+    attributes:
+      label: Cosa succede e cosa ti aspettavi
+      description: Non incollare password, chiavi o dati reali di clienti e negozi.
+    validations:
+      required: true
+  - type: textarea
+    id: passi
+    attributes:
+      label: Passi per riprodurlo
+    validations:
+      required: true
+  - type: input
+    id: sistema
+    attributes:
+      label: Sistema operativo
+      description: Ad esempio Ubuntu Server 26.04 LTS in VMware Workstation Pro; browser della postazione

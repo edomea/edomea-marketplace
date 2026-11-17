@@ -1,0 +1,83 @@
+name: EMP Release
+# Si avvia solo quando il titolare crea un tag v<versione> (es. v0.6.0-alpha.1).
+# Produce una BOZZA di pre-release: niente viene pubblicato finché il titolare
+# non la rivede e la pubblica a mano. Il job di pubblicazione richiede inoltre
+# l'approvazione dell'ambiente "release".
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  check:
+    name: Controlli di versione
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Versioni, tag e CHANGELOG coerenti
+        run: php tools/check-release.php "$GITHUB_REF_NAME"
+
+  verify:
+    name: Test e installazione reale
+    needs: check
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    name: Bozza di release
+    needs: [check, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write      # creare la bozza di release
+      id-token: write      # attestazione di provenienza
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemblaggio degli allegati
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"; V="${TAG#v}"
+          php tools/check-release.php "$TAG" --note=notes.md
+
+          # Pacchetto di EMP Server (riproducibile; senza plugin dimostrativi).
+          mkdir -p assets
+          tools/build-server.sh assets
+          test -f "assets/emp-server-${V}.tar.gz"
+          # Il pacchetto deve contenere solo emp-core in pacchetti/ e il proprio SHA256SUMS.
+          tar -xzf "assets/emp-server-${V}.tar.gz" -C "$RUNNER_TEMP"
+          (cd "$RUNNER_TEMP/emp-server-${V}" && sha256sum --strict -c SHA256SUMS > /dev/null)
+          test "$(jq -r '[.packages[].id] | join(",")' "$RUNNER_TEMP/emp-server-${V}/pacchetti/emp-packages.json")" = "emp-core"
+
+          (cd assets && sha256sum ./* | sed 's# \./# #' > SHA256SUMS.txt)
+          cat assets/SHA256SUMS.txt
+
+          {
+            cat notes.md
+            echo
+            echo "---"
+            echo "**Versione di laboratorio, non per la produzione.** Il pacchetto non è ancora firmato: verificarlo con le impronte e l'attestazione."
+            echo
+            echo "- \`emp-server-${V}.tar.gz\`: EMP Server per **Ubuntu Server LTS** (26.04 consigliata, 24.04 supportata), con il Core e il catalogo dei plugin."
+            echo "  Installazione: \`tar -xzf emp-server-${V}.tar.gz && cd emp-server-${V} && sudo ./installa.sh\`"
+            echo "  Guida: [EMP Server su Ubuntu](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/docs/ambiente-server-linux.md)."
+            echo
+            echo "Verifica: \`sha256sum -c emp-server-${V}.tar.gz.sha256\` e"
+            echo "\`gh attestation verify emp-server-${V}.tar.gz --repo ${GITHUB_REPOSITORY}\`"
+          } > release-notes.md
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: 'assets/*'
+      - name: Creazione della bozza (da pubblicare a mano)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          PRE=""; case "$TAG" in *-alpha.*|*-beta.*|*-rc.*) PRE="--prerelease";; esac
+          gh release create "$TAG" assets/* --verify-tag --draft $PRE \
+            --title "EMP ${TAG#v}" --notes-file release-notes.md

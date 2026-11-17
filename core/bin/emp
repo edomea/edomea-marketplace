@@ -4,12 +4,14 @@
 declare(strict_types=1);
 
 /*
- * Riga di comando di EMP Core. Usata da EMP Desk e dal Control Center.
+ * Riga di comando di EMP Core. Usata dall'installer di EMP Server (emp-server).
  *
  *   emp piano      [id …]                  mostra l'ordine di installazione
  *   emp installa   --utente=NOME [id …]    installa/aggiorna Core e plugin
  *   emp disinstalla --utente=NOME id       rimuove un plugin dal registro (i dati restano)
  *   emp elenco                             moduli installati
+ *   emp codice-setup                       codice monouso per il primo setup da un'altra postazione
+ *   emp recupero-tecnico --tecnico=NOME    nuova password del Tecnico (letta da tastiera) e nuova Recovery Key
  *
  * Uscita: 0 riuscito, 1 errore, 2 uso errato. Output JSON con --json.
  */
@@ -26,12 +28,15 @@ $args = array_slice($argv, 1);
 $command = array_shift($args) ?? '';
 $json = false;
 $actor = '';
+$tecnico = '';
 $ids = [];
 foreach ($args as $arg) {
     if ($arg === '--json') {
         $json = true;
     } elseif (str_starts_with($arg, '--utente=')) {
         $actor = substr($arg, 9);
+    } elseif (str_starts_with($arg, '--tecnico=')) {
+        $tecnico = substr($arg, 10);
     } elseif (preg_match('/^[a-z][a-z0-9-]{2,63}$/', $arg)) {
         $ids[] = $arg;
     } else {
@@ -47,6 +52,22 @@ $out = static function (bool $ok, array $lines) use ($json): never {
         fwrite($ok ? STDOUT : STDERR, implode("\n", $lines) . "\n");
     }
     exit($ok ? 0 : 1);
+};
+
+// Lettura di un segreto senza eco sul terminale (da una pipe: una riga).
+$readSecret = static function (string $prompt): string {
+    $tty = stream_isatty(STDIN);
+    if ($tty) {
+        fwrite(STDERR, $prompt);
+        shell_exec('stty -echo');
+    }
+    $line = fgets(STDIN);
+    if ($tty) {
+        shell_exec('stty echo');
+        fwrite(STDERR, "\n");
+    }
+
+    return rtrim((string) $line, "\r\n");
 };
 
 try {
@@ -82,8 +103,31 @@ try {
             }
             $out(true, $lines);
             // no break
+        case 'codice-setup':
+            $code = $config->kernel()->access()->createSetupCode('console');
+            $out(true, [
+                "Codice di setup: {$code}",
+                'Valido ' . Emp\Core\Access\AccessService::SETUP_CODE_HOURS . ' ore, una sola volta. Generarne uno nuovo annulla il precedente.',
+            ]);
+            // no break
+        case 'recupero-tecnico':
+            if ($tecnico === '') {
+                fwrite(STDERR, "Uso: emp recupero-tecnico --tecnico=NOME\n");
+                exit(2);
+            }
+            $password = $readSecret('Nuova password del Tecnico (almeno 12 caratteri): ');
+            if (stream_isatty(STDIN) && $readSecret('Ripeti la password: ') !== $password) {
+                $out(false, ['Le due password non coincidono']);
+            }
+            $key = $config->kernel()->access()->consoleResetTecnico($tecnico, $password, 'console');
+            $out(true, [
+                'Password del Tecnico aggiornata e sessioni chiuse.',
+                "Nuova Recovery Key: {$key}",
+                'Conservarla offline: la precedente non è più valida.',
+            ]);
+            // no break
         default:
-            fwrite(STDERR, "Comandi: piano, installa, disinstalla, elenco\n");
+            fwrite(STDERR, "Comandi: piano, installa, disinstalla, elenco, codice-setup, recupero-tecnico\n");
             exit(2);
     }
 } catch (\Throwable $e) {

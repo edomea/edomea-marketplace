@@ -1,0 +1,7 @@
+# Fine riga LF ovunque: i pacchetti dei moduli devono avere la stessa impronta
+# SHA-256 su Linux e su Windows (build riproducibili).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.zip binary
+*.exe binary

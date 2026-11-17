@@ -8,6 +8,12 @@
       location.replace("index.html");
       return;
     }
+    document.getElementById("avviso-http").hidden = stato.protetto;
+    if (!stato.codice_setup) {
+      const campo = document.getElementById("campo-codice");
+      campo.querySelector("input").required = false;
+      campo.hidden = true;
+    }
   } catch (e) {
     EMP.toast(e.message, true);
   }
@@ -24,6 +30,7 @@
     btn.disabled = true;
     try {
       const out = await EMP.api("accesso/setup", "POST", {
+        codice: String(f.get("codice") || ""),
         username: String(f.get("username")),
         nome: String(f.get("nome")),
         password: String(f.get("password")),

@@ -13,7 +13,7 @@ use Emp\Core\Module\ManifestException;
  * GitHub approvata). Ogni pacchetto è verificato con l'impronta SHA-256
  * dell'indice prima di essere aperto.
  *
- * Il Core (emp-core) non si installa da qui: lo installa e aggiorna EMP Desk.
+ * Il Core (emp-core) non si installa da qui: lo installa e aggiorna EMP Server (installa.sh).
  */
 final class Catalog
 {
@@ -64,7 +64,7 @@ final class Catalog
                 throw new PackageException('Indice del catalogo: voce non valida');
             }
             if ($id === Manifest::CORE_ID) {
-                continue; // Il Core si aggiorna da EMP Desk.
+                continue; // Il Core si aggiorna con installa.sh.
             }
             if (isset($entries[$id])) {
                 throw new PackageException(sprintf('Indice del catalogo: plugin duplicato %s', $id));

@@ -13,6 +13,8 @@ use Emp\Core\Support\Uuid;
  * password per tutti, nessun OTP o servizio esterno.
  *
  * - Primo setup: crea l'unico Amministratore Tecnico e la sua Recovery Key.
+ *   Da un'altra postazione serve il codice di setup monouso generato sulla
+ *   console del Server (createSetupCode, comando emp codice-setup).
  * - Login: sessione con token casuale; nel database solo l'impronta SHA-256.
  * - Blocco temporaneo dopo troppi tentativi falliti (per utente e per indirizzo).
  * - Gli amministratori impostano password temporanee, revocano accessi,
@@ -36,6 +38,8 @@ final class AccessService
     private const USERNAME_PATTERN = '/^[a-z0-9][a-z0-9._-]{2,63}$/';
     private const SETTING_RECOVERY = 'tecnico_recovery_key';
     private const SETTING_SETUP = 'setup_tecnico';
+    private const SETTING_SETUP_CODE = 'codice_setup';
+    public const SETUP_CODE_HOURS = 24;
     private const BASE32 = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 
     private readonly string $users;
@@ -71,10 +75,22 @@ final class AccessService
      * Crea l'unico Amministratore Tecnico. Restituisce la Recovery Key in chiaro:
      * è l'unica volta in cui esiste fuori dal computer dell'utente.
      */
-    public function setupTecnico(string $username, string $displayName, string $password): string
+    public function setupTecnico(string $username, string $displayName, string $password, ?string $setupCode = null, bool $requireCode = false, string $ip = ''): string
     {
         if ($this->isInitialized()) {
             throw new AccessException('Il primo setup è già stato completato', 409);
+        }
+        $storedCode = $this->setting(self::SETTING_SETUP_CODE);
+        $checkCode = $requireCode || $storedCode !== null;
+        if ($checkCode) {
+            $this->assertNotLocked('(setup)', $ip, 'setup');
+            [$codeHash, $expires] = array_pad(explode('|', (string) $storedCode, 2), 2, '');
+            $valid = password_verify(self::normalizeCode((string) $setupCode), $codeHash !== '' ? $codeHash : $this->dummyHash());
+            if (!$valid || $storedCode === null || $expires <= $this->now()) {
+                $this->recordAttempt('(setup)', $ip, 'setup', false);
+                $this->audit->record('(setup)', self::MODULE, 'setup_rifiutato', 'utente', '-', 0);
+                throw new AccessException('Codice di setup non valido o scaduto. Generarne uno nuovo sulla console del Server con: sudo emp-server codice-setup', 401);
+            }
         }
         $username = $this->checkUsername($username);
         $displayName = $this->checkDisplayName($displayName);
@@ -94,6 +110,8 @@ final class AccessService
             }
             $id = $this->insertUser($username, $displayName, Role::TECNICO, $password, false, $username);
             $key = $this->storeNewRecoveryKey($username);
+            // Il codice di setup è monouso.
+            $this->pdo->prepare("DELETE FROM {$this->settings} WHERE name = ?")->execute([self::SETTING_SETUP_CODE]);
             $this->pdo->commit();
         } catch (\Throwable $e) {
             if ($this->pdo->inTransaction()) {
@@ -101,7 +119,59 @@ final class AccessService
             }
             throw $e;
         }
+        if ($checkCode) {
+            $this->recordAttempt('(setup)', $ip, 'setup', true);
+        }
         $this->audit->record($username, self::MODULE, 'setup_tecnico', 'utente', $id, 0, null, $this->snapshot($username, Role::TECNICO, true));
+
+        return $key;
+    }
+
+    /**
+     * Codice di setup monouso, valido SETUP_CODE_HOURS ore: permette il primo
+     * setup da un'altra postazione (in HTTPS). Generarne uno nuovo annulla il precedente.
+     * Solo dalla console del Server (riga di comando).
+     */
+    public function createSetupCode(string $actor): string
+    {
+        if ($this->isInitialized()) {
+            throw new AccessException('Il primo setup è già stato completato', 409);
+        }
+        $code = self::generateKey(15);
+        $expires = $this->clock->now()->modify('+' . self::SETUP_CODE_HOURS . ' hours')->format('Y-m-d H:i:s');
+        $this->putSetting(self::SETTING_SETUP_CODE, self::hash(self::normalizeCode($code)) . '|' . $expires, $actor);
+        $this->audit->record($actor, self::MODULE, 'codice_setup', 'impostazione', self::SETTING_SETUP_CODE, 0, null, 'scade il ' . $expires);
+
+        return $code;
+    }
+
+    /**
+     * Recupero di emergenza dalla console del Server (chi ha i permessi di root
+     * sulla macchina controlla già l'installazione): nuova password del Tecnico,
+     * chiusura di tutte le sue sessioni e NUOVA Recovery Key.
+     */
+    public function consoleResetTecnico(string $username, string $newPassword, string $actor): string
+    {
+        $username = strtolower(trim($username));
+        $row = $this->findByUsername($username);
+        if ($row === null || $row['role'] !== Role::TECNICO) {
+            throw new AccessException('Amministratore Tecnico non trovato', 404);
+        }
+        $this->checkPassword($newPassword, $username);
+        $this->pdo->beginTransaction();
+        try {
+            $this->updatePassword((string) $row['id'], $newPassword, false, $actor);
+            $this->pdo->prepare("UPDATE {$this->users} SET active = 1 WHERE id = ?")->execute([$row['id']]);
+            $this->revokeAllSessions((string) $row['id'], null);
+            $key = $this->storeNewRecoveryKey($actor);
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+        $this->audit->record($actor, self::MODULE, 'recupero_console', 'utente', (string) $row['id'], 0, null, 'nuova Recovery Key generata');
 
         return $key;
     }
@@ -344,27 +414,42 @@ final class AccessService
     private function storeNewRecoveryKey(string $actor): string
     {
         $key = self::generateKey();
-        $hash = self::hash(self::normalizeKey($key));
-        $now = $this->now();
-        $upd = $this->pdo->prepare("UPDATE {$this->settings} SET value = ?, updated_at = ?, updated_by = ? WHERE name = ?");
-        $upd->execute([$hash, $now, $actor, self::SETTING_RECOVERY]);
-        if ($upd->rowCount() === 0) {
-            $this->pdo->prepare("INSERT INTO {$this->settings} (name, value, updated_at, updated_by) VALUES (?, ?, ?, ?)")
-                ->execute([self::SETTING_RECOVERY, $hash, $now, $actor]);
-        }
+        $this->putSetting(self::SETTING_RECOVERY, self::hash(self::normalizeKey($key)), $actor);
 
         return $key;
     }
 
-    /** Chiave di 25 caratteri (125 bit), leggibile: EMP-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX */
-    private static function generateKey(): string
+    private function putSetting(string $name, string $value, string $actor): void
+    {
+        $now = $this->now();
+        $upd = $this->pdo->prepare("UPDATE {$this->settings} SET value = ?, updated_at = ?, updated_by = ? WHERE name = ?");
+        $upd->execute([$value, $now, $actor, $name]);
+        if ($upd->rowCount() === 0) {
+            $this->pdo->prepare("INSERT INTO {$this->settings} (name, value, updated_at, updated_by) VALUES (?, ?, ?, ?)")
+                ->execute([$name, $value, $now, $actor]);
+        }
+    }
+
+    /**
+     * Chiave leggibile a gruppi di 5: 25 caratteri (125 bit) per la Recovery Key,
+     * 15 caratteri (75 bit, monouso e a scadenza) per il codice di setup.
+     */
+    private static function generateKey(int $length = 25): string
     {
         $chars = '';
-        for ($i = 0; $i < 25; $i++) {
+        for ($i = 0; $i < $length; $i++) {
             $chars .= self::BASE32[random_int(0, 31)];
         }
 
         return 'EMP-' . implode('-', str_split($chars, 5));
+    }
+
+    /** Codice di setup senza spazi, trattini e prefisso EMP. */
+    public static function normalizeCode(string $code): string
+    {
+        $c = strtoupper((string) preg_replace('/[\s-]+/', '', $code));
+
+        return str_starts_with($c, 'EMP') && strlen($c) === 18 ? substr($c, 3) : $c;
     }
 
     public static function normalizeKey(string $key): string

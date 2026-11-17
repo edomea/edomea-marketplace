@@ -4,7 +4,7 @@
 #   tools/build-server.sh <cartella-destinazione> [--con-esempi]
 #
 # Produce emp-server-<versione>.tar.gz (e il file .sha256) con:
-#   installa.sh, disinstalla.sh, emp-server, modelli/, VERSIONE, LEGGIMI.txt,
+#   installa.sh, disinstalla.sh, emp-server, modelli/, github/, VERSIONE, LEGGIMI.txt,
 #   pacchetti/ (Core, con indice e impronte), catalogo/ (plugin installabili dal web),
 #   SHA256SUMS (controllato da installa.sh prima di qualsiasi modifica).
 # Archivio riproducibile: stesso sorgente, stessa impronta.
@@ -25,13 +25,15 @@ mkdir -p "$pkg/pacchetti" "$pkg/catalogo"
 
 cp "$root/server/installa.sh" "$root/server/disinstalla.sh" "$root/server/emp-server" "$root/server/VERSIONE" "$root/server/LEGGIMI.txt" "$pkg/"
 cp -r "$root/server/modelli" "$pkg/modelli"
+mkdir -p "$pkg/github"
+cp "$root/server/github/prepara-runner.sh" "$root/server/github/emp-installa-da-github" "$pkg/github/"
 php "$root/tools/build-packages.php" core "$pkg/pacchetti" >/dev/null
 if [[ $examples == --con-esempi ]]; then
     php "$root/tools/build-packages.php" plugin "$pkg/catalogo" --con-esempi >/dev/null
 else
     php "$root/tools/build-packages.php" plugin "$pkg/catalogo" >/dev/null
 fi
-chmod 0755 "$pkg/installa.sh" "$pkg/disinstalla.sh" "$pkg/emp-server"
+chmod 0755 "$pkg/installa.sh" "$pkg/disinstalla.sh" "$pkg/emp-server" "$pkg/github/prepara-runner.sh" "$pkg/github/emp-installa-da-github"
 
 ( cd "$pkg" && find . -type f -printf '%P\n' | LC_ALL=C sort | xargs sha256sum > "$work/SHA256SUMS" )
 mv "$work/SHA256SUMS" "$pkg/SHA256SUMS"

@@ -3,7 +3,7 @@
 Il **plugin core** di Edomea Marketplace, in **PHP** (8.2+): registro dei moduli, installazione con migrazioni, API, tracciabilità e **gestione degli altri plugin dall'interfaccia web**. Non dipende da WordPress né da Composer a runtime.
 
 - Lo installa e lo aggiorna **EMP Server** (`sudo ./installa.sh` su Ubuntu Server LTS, vedi [docs/ambiente-server-linux.md](../docs/ambiente-server-linux.md)).
-- Il Core installa a sua volta **tutti gli altri plugin**, dalla pagina `/amministrazione/plugin.html`.
+- Il Core installa a sua volta **tutti gli altri plugin**, dalla pagina `/techadmin/plugin.html`.
 - È esso stesso il modulo `emp-core` (manifest in `emp-module.json`). Specifica: [docs/architettura-moduli.md](../docs/architettura-moduli.md).
 
 ## Struttura
@@ -17,7 +17,9 @@ Il **plugin core** di Edomea Marketplace, in **PHP** (8.2+): registro dei moduli
 | `src/Version/` | Versioni e vincoli (semver con pre-release) |
 | `src/Support/` | Orologio dell'installazione (ora locale, formati gg/mm/aaaa) |
 | `public/index.php` | Punto d'ingresso HTTP (radice del web server) |
-| `public/amministrazione/` | Pagine web: primo setup, accesso e utenti, recupero del Tecnico, **Plugin** |
+| `public/techadmin/` | Pagine dell'Amministratore Tecnico: primo setup, accesso, amministratori, recupero, **Plugin** |
+| `public/admin/` | Pagine dell'Amministratore Operativo e degli utenti operativi: accesso, utenti, cambio password |
+| `public/assets/` | Script e stile comuni alle due aree |
 | `bin/emp` | Riga di comando: `piano`, `installa --utente=…`, `disinstalla`, `elenco`, `codice-setup`, `recupero-tecnico --tecnico=…` |
 | `migrations/` | Migrazioni SQL del Core |
 

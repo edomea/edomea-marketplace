@@ -4,7 +4,7 @@ Versione 1.1 · 16/11/2026 · Deriva dall'allegato *VenVia 0.4 — Account, ruol
 
 > Il sistema deve funzionare **senza Internet**. TOTP (Google Authenticator) e OTP via email sono **rimossi**. Per tutti gli utenti l'accesso avviene con **nome utente e password**. Gli amministratori possono cambiare le password e revocare gli accessi; l'Amministratore Tecnico può usare una **Recovery Key** se perde la propria password.
 
-Implementazione: `core/src/Access/`, migrazione `core/migrations/0002_accesso.sql`, pagine `core/public/amministrazione/`.
+Implementazione: `core/src/Access/`, migrazione `core/migrations/0002_accesso.sql`, pagine `core/public/techadmin/` (Amministratore Tecnico) e `core/public/admin/` (Amministratore Operativo e utenti).
 
 Revisione 1.1 (16/11/2026): con il passaggio a **EMP Server su Ubuntu** ([ambiente](ambiente-server-linux.md)) il Server è spesso una macchina virtuale senza browser. Le funzioni sensibili non sono più limitate al «computer Server» ma all'**HTTPS**, e il primo setup richiede un **codice monouso** generato sulla console del Server.
 
@@ -22,7 +22,7 @@ Il Tecnico non gestisce direttamente gli operatori e non svolge automaticamente 
 
 ## 2. Primo setup
 
-1. Da qualsiasi postazione del negozio, in **HTTPS**: pagina `/amministrazione/setup.html`. In HTTP il setup è rifiutato.
+1. Da qualsiasi postazione del negozio, in **HTTPS**: pagina `/techadmin/setup.html`. In HTTP il setup è rifiutato.
 2. **Codice di setup**: mostrato alla fine di `installa.sh`, oppure generato con `sudo emp-server codice-setup`.
    - È composto da 15 caratteri casuali, formato `EMP-XXXXX-XXXXX-XXXXX`.
    - È valido **24 ore** e si usa **una sola volta**; generarne uno nuovo annulla il precedente.
@@ -61,7 +61,7 @@ Un amministratore, sugli utenti che gestisce, può:
 - Generata al primo setup: 25 caratteri casuali (125 bit), formato `EMP-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`.
 - Mostrata una sola volta, **scaricabile in TXT**, con l'avviso obbligatorio e la conferma «Ho scaricato la Recovery Key e mi assumo la responsabilità della sua custodia».
 - Nel database c'è solo il suo hash: nessuno, nemmeno il Tecnico, può rileggerla.
-- **Uso** (pagina `/amministrazione/recupero.html`, solo in HTTPS): nome utente del Tecnico, Recovery Key, nuova password. Il Core imposta la nuova password, chiude tutte le sessioni, **invalida la chiave usata e ne genera una nuova**, da salvare allo stesso modo.
+- **Uso** (pagina `/techadmin/recupero.html`, solo in HTTPS): nome utente del Tecnico, Recovery Key, nuova password. Il Core imposta la nuova password, chiude tutte le sessioni, **invalida la chiave usata e ne genera una nuova**, da salvare allo stesso modo.
 - Massimo 3 tentativi falliti ogni 15 minuti.
 - **Recovery Key persa**: dalla console del Server, `sudo emp-server recupero-tecnico NOME`.
   - Chiede la nuova password senza mostrarla, chiude tutte le sessioni del Tecnico e genera una **nuova** Recovery Key.

@@ -78,7 +78,7 @@ const EMP = {
       key,
       "",
       "Serve a reimpostare la password dell'Amministratore Tecnico dalla pagina",
-      "/amministrazione/recupero.html di EMP (indirizzo https://). Dopo l'uso viene",
+      "/techadmin/recupero.html di EMP (indirizzo https://). Dopo l'uso viene",
       "sostituita da una nuova chiave. Conservare questo file offline.",
     ].join("\r\n");
     container.replaceChildren();

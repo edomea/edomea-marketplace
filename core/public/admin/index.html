@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
-<title>Accesso — EMP</title>
-<link rel="stylesheet" href="stile.css">
-<script defer src="comune.js"></script>
-<script defer src="index.js"></script>
+<title>Amministrazione — EMP</title>
+<link rel="stylesheet" href="/assets/stile.css">
+<script defer src="/assets/comune.js"></script>
+<script defer src="/assets/accesso.js"></script>
 </head>
-<body>
+<body data-area="admin">
 <header class="emp-header">
   <strong>EMP — Amministrazione</strong>
   <span><span id="user-badge"></span> <button id="logout" type="button" class="secondario" hidden>Esci</button></span>
@@ -23,8 +23,7 @@
       <label>Password <input name="password" type="password" autocomplete="current-password" required></label>
       <button type="submit">Accedi</button>
     </form>
-    <p class="note">Password dimenticata? Gli operatori si rivolgono al proprio amministratore, gli amministratori al Tecnico.
-      Il Tecnico usa la <a href="recupero.html">Recovery Key</a>.</p>
+    <p class="note">Password dimenticata? Gli utenti operativi si rivolgono al proprio amministratore, gli amministratori all'Amministratore Tecnico.</p>
   </section>
 
   <!-- Cambio password (obbligatorio dopo una password temporanea) -->
@@ -42,7 +41,6 @@
   <!-- Collegamenti -->
   <section id="links-box" class="box" hidden>
     <h2>Funzioni</h2>
-    <p id="link-plugin" hidden><a href="plugin.html">Plugin</a> — installazione e aggiornamento dei plugin (solo in HTTPS)</p>
     <p><a href="#" id="show-password">Cambia la tua password</a></p>
   </section>
 

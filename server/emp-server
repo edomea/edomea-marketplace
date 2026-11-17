@@ -146,11 +146,12 @@ ca_fingerprint() {
 cmd_indirizzi() {
     local ip any=0
     for ip in $(private_ipv4); do
-        echo "  https://${ip}/amministrazione/"
+        echo "  https://${ip}/admin/       Amministratore Operativo e utenti"
+        echo "  https://${ip}/techadmin/   Amministratore Tecnico"
         any=1
     done
-    echo "  https://$(host_name).local/amministrazione/   (se la rete risolve i nomi .local)"
-    [[ -n $(extra_dns) ]] && echo "  https://$(extra_dns)/amministrazione/"
+    echo "  https://$(host_name).local/admin/ e /techadmin/   (se la rete risolve i nomi .local)"
+    [[ -n $(extra_dns) ]] && echo "  https://$(extra_dns)/admin/ e /techadmin/"
     [[ $any -eq 1 ]] || echo "  (nessun indirizzo di rete privata: controllare la scheda di rete della VM, modalità Bridged)"
 }
 
@@ -182,7 +183,7 @@ cmd_codice_setup() {
     core_cli codice-setup
     echo "Inserirlo nella pagina di primo setup:"
     local ip
-    for ip in $(private_ipv4); do echo "  https://${ip}/amministrazione/setup.html"; done
+    for ip in $(private_ipv4); do echo "  https://${ip}/techadmin/setup.html"; done
 }
 
 cmd_recupero_tecnico() {

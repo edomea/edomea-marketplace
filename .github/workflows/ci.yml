@@ -174,7 +174,7 @@ jobs:
           sudo ./installa.sh | tee "$RUNNER_TEMP/installa-2.log"
           if grep -q 'Primo setup' "$RUNNER_TEMP/installa-2.log"; then exit 1; fi
           # Prima di ogni aggiornamento: backup completo automatico.
-          sudo sh -c "ls /var/lib/emp/backup/emp-backup-*-prima-di-$(cat server/VERSIONE).tar"
+          sudo sh -c "ls /var/lib/emp/backup/emp-backup-*-prima-di-$(cat VERSIONE).tar"
           sudo systemctl restart mariadb php*-fpm nginx
           sleep 2
           sudo emp-server moduli | grep -q emp-esempio

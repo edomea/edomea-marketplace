@@ -120,8 +120,9 @@ fi
 chown root:root "$CONF"; chmod 0644 "$CONF"
 
 tmp=$(mktemp)
-printf '# Il runner GitHub può eseguire come root SOLO il comando di installazione verificata.\nDefaults:%s !requiretty\n%s ALL=(root) NOPASSWD: %s\n' \
-    "$UTENTE" "$UTENTE" "$COMANDO" > "$tmp"
+# Niente "Defaults !requiretty": non serve su Ubuntu e sudo-rs (predefinito da Ubuntu 26.04) non lo riconosce.
+printf '# Il runner GitHub può eseguire come root SOLO il comando di installazione verificata.\n%s ALL=(root) NOPASSWD: %s\n' \
+    "$UTENTE" "$COMANDO" > "$tmp"
 visudo -cqf "$tmp" || die "regola sudo non valida"
 install -m 0440 -o root -g root "$tmp" "$SUDOERS"; rm -f "$tmp"
 echo "Comando: $COMANDO · configurazione: $CONF"

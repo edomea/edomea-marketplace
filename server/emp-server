@@ -47,6 +47,10 @@ core_cli() {
     runuser -u "$EMP_USER" -- env EMP_CONFIG="$EMP_CONFIG" php "$EMP_MODULES/emp-core/bin/emp" "$@"
 }
 
+# Primo indirizzo privato. sed legge tutto l'elenco: con "head -n1" la funzione verrebbe
+# interrotta (SIGPIPE) sulle macchine con più indirizzi e, con pipefail, lo script si fermerebbe.
+first_private_ipv4() { private_ipv4 | sed -n 1p; }
+
 # Indirizzi IPv4 privati della macchina (quelli coperti dal certificato).
 private_ipv4() {
     local ip
@@ -246,7 +250,7 @@ warn_personal_emp_user() {
     echo
     echo "ATTENZIONE: l'utente '$EMP_USER' è un account personale (accesso SSH, sudo): EMP gira con i suoi permessi."
     echo "  1. crea il tuo utente:     sudo adduser NOME && sudo usermod -aG sudo NOME"
-    echo "  2. rientra con quello:     ssh NOME@$(private_ipv4 | head -n1)"
+    echo "  2. rientra con quello:     ssh NOME@$(first_private_ipv4)"
     echo "  3. elimina il vecchio:     sudo emp-server elimina-vecchio-utente"
     echo
 }
@@ -313,7 +317,7 @@ cmd_accesso_scp() {
     fi
     usermod -aG "$EMP_SCP_GROUP" "$name"
     local ip
-    ip=$(private_ipv4 | head -n1)
+    ip=$(first_private_ipv4)
     info "Accesso scp dato a $name (vale dal prossimo accesso SSH di $name)"
     echo "  Scaricare un backup, dal PC:   scp $name@$ip:$EMP_BACKUP/emp-backup-….tar ."
     echo "  Caricare un plugin, dal PC:    scp mio-plugin.zip $name@$ip:$EMP_ARRIVALS/"
@@ -513,7 +517,7 @@ remote_connect() {
             echo
             echo "Collegamento a Google Drive. Serve un browser: dal PC, apri una NUOVA connessione SSH così:"
             echo
-            echo "    ssh -L 53682:127.0.0.1:53682 $(id -un "${SUDO_USER:-root}" 2>/dev/null || echo utente)@$(private_ipv4 | head -n1)"
+            echo "    ssh -L 53682:127.0.0.1:53682 $(id -un "${SUDO_USER:-root}" 2>/dev/null || echo utente)@$(first_private_ipv4)"
             echo
             echo "poi apri in Chrome il link http://127.0.0.1:53682/... che compare qui sotto e accedi con l'account Google dei backup."
             echo "EMP vede solo i file che crea lui su Drive (permesso drive.file), nella cartella $folder."

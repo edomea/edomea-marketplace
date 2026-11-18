@@ -6,7 +6,10 @@
 #   sudo emp-server codice-setup                   nuovo codice monouso per il primo setup del Tecnico
 #   sudo emp-server recupero-tecnico NOME          nuova password del Tecnico e nuova Recovery Key
 #   sudo emp-server certificato [--se-necessario]  rigenera il certificato HTTPS (es. cambio indirizzo IP)
-#   sudo emp-server backup                         copia del database e della configurazione
+#   sudo emp-server backup                         backup completo di EMP (database, Core, plugin, versione)
+#   sudo emp-server backup-elenco                  backup su questa macchina e sulla destinazione remota
+#   sudo emp-server backup-remoto collega gdrive   copia cifrata di ogni backup su Google Drive (anche sftp)
+#   sudo emp-server ripristina FILE|--remoto NOME  rimette EMP com'era nel backup (stessa o nuova macchina)
 #   sudo emp-server moduli                         moduli installati (Core e plugin)
 #   sudo emp-server azzera --nome NOME             total reset di un clone del master (dati, identità, nome)
 #   sudo emp-server collega-github                 collega questo Server a GitHub (token da GitHub)
@@ -191,6 +194,10 @@ cmd_stato() {
     core_cli elenco | sed 's/^/  /' || true
     echo "Certificato HTTPS: scade il $(openssl x509 -in "$EMP_TLS/server.crt" -noout -enddate | cut -d= -f2)"
     echo "Impronta SHA-256 dell'autorità locale: $(ca_fingerprint)"
+    local last
+    last=$(find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf '%T@ %f\n' 2>/dev/null | sort -rn | sed -n '1s/^[^ ]* //p')
+    echo "Ultimo backup: ${last:-nessuno}"
+    if [[ -f $REMOTE_CONF ]]; then echo "Copia remota: $(remote_description)"; else echo "Copia remota: non collegata (sudo emp-server backup-remoto collega gdrive)"; fi
     echo "Indirizzi:"
     cmd_indirizzi
 }
@@ -211,20 +218,357 @@ cmd_recupero_tecnico() {
     core_cli recupero-tecnico "--tecnico=$1"
 }
 
+# ---------------------------------------------------------------- backup e ripristino di EMP
+#
+# Il backup riguarda TUTTO EMP e solo EMP: database, Core e plugin installati, cataloghi
+# dei plugin e il pacchetto della versione di EMP Server in uso (per rimettere la stessa
+# versione). Non contiene ciò che appartiene alla macchina: Ubuntu, nome host, chiavi SSH,
+# certificato HTTPS e sua autorità, collegamento a GitHub, destinazione dei backup remoti.
+# Un ripristino su una macchina nuova ne conserva quindi l'identità, come una nuova installazione.
+#
+# File: /var/lib/emp/backup/emp-backup-<server>-<AAAAMMGG-HHMMSS>[-etichetta].tar
+#   MANIFEST  SHA256SUMS  database.sql.gz  dati.tar.gz  [emp-server-<versione>.tar.gz]
+# Se è collegata una destinazione remota (emp-server backup-remoto), ogni backup viene
+# copiato anche lì, cifrato con la chiave dei backup.
+
+readonly BACKUP_FORMAT=1
+# Tra i dati (non in $EMP_HOME): resta anche dopo disinstalla.sh, così il backup automatico
+# di una reinstallazione conosce ancora la versione in uso e ne include il pacchetto.
+readonly EMP_PACKAGE_DIR=$EMP_DATA/pacchetto
+readonly REMOTE_DIR=$EMP_CONF_DIR/backup-remoto
+readonly REMOTE_CONF=$REMOTE_DIR/rclone.conf
+readonly REMOTE_KEEP=30
+readonly EMP_DATA_DIRS="moduli catalogo catalogo-locale"
+
+# Cartelle temporanee rimosse all'uscita (niente trap RETURN: in Bash sono globali e si
+# sovrappongono quando una funzione ne chiama un'altra, es. il backup dentro il ripristino).
+EMP_TEMP_DIRS=()
+emp_cleanup() { local d; for d in "${EMP_TEMP_DIRS[@]}"; do rm -rf -- "$d"; done; }
+trap emp_cleanup EXIT
+new_temp_dir() { # $1 = variabile, $2 = cartella padre
+    local -n _out=$1
+    _out=$(mktemp -d "$2/.$1-XXXXXX")
+    EMP_TEMP_DIRS+=("$_out")
+}
+
+installed_server_version() {
+    if [[ -f $EMP_HOME/VERSIONE ]]; then
+        tr -d '[:space:]' < "$EMP_HOME/VERSIONE"
+    else # programmi tolti (disinstalla.sh): la versione è quella del pacchetto conservato
+        find "$EMP_PACKAGE_DIR" -maxdepth 1 -name 'emp-server-*.tar.gz' -printf '%f\n' 2>/dev/null | sed -n '1s/^emp-server-\(.*\)\.tar\.gz$/\1/p'
+    fi
+}
+installed_core_version() {
+    # shellcheck disable=SC2016  # codice PHP, non variabili della shell
+    [[ -f $EMP_MODULES/emp-core/emp-module.json ]] && php -r 'echo json_decode(file_get_contents($argv[1]), true)["version"] ?? "";' "$EMP_MODULES/emp-core/emp-module.json"
+}
+emp_database_exists() { [[ -n $(mariadb -N -e "SHOW DATABASES LIKE 'emp'" 2>/dev/null) ]]; }
+
+rclone_emp() { rclone --config "$REMOTE_CONF" "$@"; }
+remote_configured() { [[ -f $REMOTE_CONF ]] && command -v rclone >/dev/null; }
+
 cmd_backup() {
     require_root backup
-    local stamp dest
+    local label='' upload=1
+    while (($#)); do
+        case $1 in
+            --etichetta) [[ $# -ge 2 && $2 =~ ^[a-z0-9][a-z0-9.-]{0,40}$ ]] || die "etichetta non valida"; label=$2; shift 2 ;;
+            --solo-locale) upload=0; shift ;;
+            *) die "opzione sconosciuta: $1" ;;
+        esac
+    done
+    emp_database_exists || die "database emp assente: niente da salvare"
+    [[ -f $EMP_MODULES/emp-core/emp-module.json ]] || die "Core non installato: niente da salvare"
+
+    local server core stamp name work file
+    server=$(installed_server_version)
+    core=$(installed_core_version)
     stamp=$(date +%Y%m%d-%H%M%S)
+    name="emp-backup-$(host_name)-${stamp}${label:+-$label}"
     install -d -m 0700 -o root -g root "$EMP_BACKUP"
-    dest=$EMP_BACKUP/emp-$stamp
-    install -d -m 0700 "$dest"
-    mariadb-dump --single-transaction --routines --events --databases emp | gzip -9 > "$dest/database.sql.gz"
-    # Configurazione e moduli (inclusa la chiave dell'autorità locale: la cartella è riservata a root).
-    tar -czf "$dest/configurazione.tar.gz" -C / etc/emp var/lib/emp/moduli var/lib/emp/catalogo var/lib/emp/catalogo-locale 2>/dev/null
-    ( cd "$dest" && sha256sum ./*.gz > SHA256SUMS )
-    info "Backup creato: $dest"
-    # Conserva solo gli ultimi BACKUP_KEEP.
-    find "$EMP_BACKUP" -mindepth 1 -maxdepth 1 -type d -name 'emp-*' | sort -r | tail -n +$((BACKUP_KEEP + 1)) | xargs -r rm -rf --
+    new_temp_dir work "$EMP_BACKUP"
+
+    mariadb-dump --single-transaction --routines --events --triggers --hex-blob \
+        --default-character-set=utf8mb4 emp | gzip -6 > "$work/database.sql.gz"
+    gzip -t "$work/database.sql.gz" || die "esportazione del database non riuscita"
+    # shellcheck disable=SC2086  # elenco fisso di cartelle
+    tar -C "$EMP_DATA" -czf "$work/dati.tar.gz" $EMP_DATA_DIRS
+    local package="emp-server-${server}.tar.gz"
+    if [[ -f $EMP_PACKAGE_DIR/$package ]]; then
+        cp "$EMP_PACKAGE_DIR/$package" "$work/$package"
+    else
+        package=''
+        echo "Avviso: pacchetto di EMP Server ${server:-?} non conservato sul Server (installato prima della 0.6.0-alpha.6):"
+        echo "        il ripristino di questo backup richiederà EMP Server ${server:-?} già installato."
+    fi
+    {
+        echo "formato=$BACKUP_FORMAT"
+        echo "emp_server=$server"
+        echo "core=$core"
+        echo "creato=$(date -Iseconds)"
+        echo "macchina=$(host_name)"
+        echo "etichetta=$label"
+        echo "pacchetto=$package"
+    } > "$work/MANIFEST"
+    ( cd "$work" && sha256sum MANIFEST database.sql.gz dati.tar.gz ${package:+"$package"} > SHA256SUMS )
+    file="$EMP_BACKUP/$name.tar"
+    tar -C "$work" -cf "$file.parziale" MANIFEST SHA256SUMS database.sql.gz dati.tar.gz ${package:+"$package"}
+    chmod 0600 "$file.parziale"
+    mv "$file.parziale" "$file"
+    rm -rf "$work"
+    info "Backup di EMP (Server ${server}, Core ${core}): $file ($(du -h "$file" | cut -f1))"
+
+    # Conserva solo gli ultimi BACKUP_KEEP (anche le cartelle del vecchio formato).
+    find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf '%T@ %p\n' | sort -rn \
+        | tail -n +$((BACKUP_KEEP + 1)) | cut -d' ' -f2- | xargs -r rm -f --
+    find "$EMP_BACKUP" -mindepth 1 -maxdepth 1 -type d -name 'emp-2*' -exec rm -rf -- {} +
+
+    if ((upload)) && remote_configured; then
+        if rclone_emp copyto "$file" "emp-cifrato:$name.tar" 2>&1 | sed 's/^/  /'; then
+            info "Copia cifrata inviata a $(remote_description)"
+            # Conservazione remota: ultimi REMOTE_KEEP backup di QUESTO server (gli altri non si toccano).
+            rclone_emp lsf emp-cifrato: --files-only 2>/dev/null | grep "^emp-backup-$(host_name)-[0-9].*\.tar\$" | sort | head -n -"$REMOTE_KEEP" \
+                | while read -r old; do rclone_emp deletefile "emp-cifrato:$old" || true; done
+        else
+            echo "Avviso: copia remota non riuscita (Internet o destinazione non raggiungibile): il backup locale è valido."
+            return 3
+        fi
+    elif ((upload)); then
+        echo "Avviso: nessuna destinazione remota collegata: il backup resta solo su questa macchina (sudo emp-server backup-remoto collega gdrive)."
+    fi
+}
+
+cmd_backup_elenco() {
+    require_root backup-elenco
+    echo "Backup su questa macchina ($EMP_BACKUP):"
+    find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf '%TY-%Tm-%Td %TH:%TM  %10s  %f\n' 2>/dev/null | sort -r | sed 's/^/  /'
+    if remote_configured; then
+        echo "Backup remoti ($(remote_description)):"
+        rclone_emp lsl emp-cifrato: 2>/dev/null | grep 'emp-backup-' | sort -k2,3r | awk '{print "  " $2 " " substr($3,1,5) "  " $1 "  " $4}' \
+            || echo "  destinazione non raggiungibile"
+    fi
+}
+
+# ---------------------------------------------------------------- destinazione remota (cifrata)
+
+remote_description() {
+    if [[ -f $REMOTE_DIR/destinazione ]]; then cat "$REMOTE_DIR/destinazione"; else echo "destinazione remota"; fi
+}
+
+new_backup_key() {
+    local raw
+    raw=$(head -c 32 /dev/urandom | base32 -w0)   # 52 caratteri A-Z e 2-7
+    echo "EMP-BK-${raw:0:6}-${raw:6:6}-${raw:12:6}-${raw:18:6}-${raw:24:6}"
+}
+
+cmd_backup_remoto() {
+    require_root backup-remoto
+    local action=${1:-stato}
+    shift || true
+    case $action in
+        collega) remote_connect "$@" ;;
+        stato)
+            if remote_configured; then
+                info "Destinazione: $(remote_description)"
+                if rclone_emp lsf emp-cifrato: --files-only >/dev/null 2>&1; then info "Raggiungibile"; else echo "Avviso: non raggiungibile ora"; fi
+            else
+                info "Nessuna destinazione remota: sudo emp-server backup-remoto collega gdrive"
+            fi ;;
+        chiave)
+            remote_configured || die "nessuna destinazione remota collegata"
+            echo "Chiave dei backup (serve per ripristinare su un'altra macchina):"
+            echo "  $(rclone reveal "$(sed -n 's/^password = //p' "$REMOTE_CONF" | head -n1)")" ;;
+        scollega)
+            rm -rf "$REMOTE_DIR"
+            info "Destinazione remota scollegata da questa macchina (i backup già inviati restano dove sono)" ;;
+        *) die "uso: emp-server backup-remoto collega gdrive|sftp|locale … | stato | chiave | scollega" ;;
+    esac
+}
+
+remote_connect() {
+    local kind=${1:-} key='' arg='' folder pw=''
+    shift || true
+    while (($#)); do
+        case $1 in
+            --chiave) [[ $# -ge 2 ]] || die "manca la chiave dopo --chiave"; key=$2; shift 2 ;;
+            *) arg=$1; shift ;;
+        esac
+    done
+    command -v rclone >/dev/null || die "rclone non installato: rieseguire installa.sh"
+    # Una sola cartella per account: il nome del server è nel nome di ogni file, così una
+    # macchina nuova vede i backup di quella vecchia e può ripristinarli.
+    folder="EMP-backup"
+    if [[ -n $key ]]; then
+        [[ $key =~ ^EMP-BK(-[A-Z2-7]{6}){5}$ ]] || die "chiave dei backup non valida (formato EMP-BK-XXXXXX-…)"
+    else
+        key=$(new_backup_key)
+    fi
+    install -d -m 0700 -o root -g root "$REMOTE_DIR"
+    local tmp
+    tmp=$(mktemp "$REMOTE_DIR/.rclone-XXXXXX")
+    case $kind in
+        gdrive)
+            echo
+            echo "Collegamento a Google Drive. Serve un browser: dal PC, apri una NUOVA connessione SSH così:"
+            echo
+            echo "    ssh -L 53682:127.0.0.1:53682 $(id -un "${SUDO_USER:-root}" 2>/dev/null || echo utente)@$(private_ipv4 | head -n1)"
+            echo
+            echo "poi apri in Chrome il link http://127.0.0.1:53682/... che compare qui sotto e accedi con l'account Google dei backup."
+            echo "EMP vede solo i file che crea lui su Drive (permesso drive.file), nella cartella $folder."
+            echo
+            rclone --config "$tmp" config create emp-destinazione drive scope=drive.file >/dev/null \
+                || { rm -f "$tmp"; die "collegamento a Google Drive non riuscito"; }
+            echo "Google Drive ($folder)" > "$REMOTE_DIR/destinazione" ;;
+        sftp)
+            [[ $arg =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || die "uso: emp-server backup-remoto collega sftp utente@host[:porta]"
+            local user=${arg%@*} hostport=${arg#*@} port=22
+            [[ $hostport == *:* ]] && port=${hostport##*:}
+            read -rs -p "Password SFTP di ${arg} (vuota per usare la chiave SSH di root): " pw; echo
+            rclone --config "$tmp" config create emp-destinazione sftp host="${hostport%%:*}" user="$user" port="$port" ${pw:+pass="$pw"} --obscure >/dev/null \
+                || { rm -f "$tmp"; die "configurazione SFTP non riuscita"; }
+            echo "SFTP ${arg} ($folder)" > "$REMOTE_DIR/destinazione" ;;
+        locale)
+            # Per i test e per un disco montato (USB, NAS): cartella su questa macchina.
+            [[ $arg == /* ]] || die "uso: emp-server backup-remoto collega locale /percorso/assoluto"
+            install -d -m 0700 "$arg"
+            rclone --config "$tmp" config create emp-destinazione local >/dev/null
+            folder="$arg/EMP-backup"
+            echo "Cartella $arg" > "$REMOTE_DIR/destinazione" ;;
+        *) rm -f "$tmp"; die "destinazione non supportata: ${kind:-?} (gdrive, sftp, locale)" ;;
+    esac
+    rclone --config "$tmp" config create emp-cifrato crypt remote="emp-destinazione:$folder" password="$key" \
+        filename_encryption=off directory_name_encryption=false --obscure >/dev/null
+    chmod 0600 "$tmp"
+    mv "$tmp" "$REMOTE_CONF"
+    rclone_emp mkdir emp-cifrato: || die "destinazione non raggiungibile"
+    info "Destinazione collegata: $(remote_description)"
+    echo
+    echo "================================================================"
+    echo " CHIAVE DEI BACKUP — salvala ORA fuori da questa macchina"
+    echo " (gestore di password, foglio stampato in cassaforte):"
+    echo
+    echo "      $key"
+    echo
+    echo " Senza questa chiave i backup remoti NON si possono ripristinare."
+    echo " Su una macchina nuova: sudo emp-server backup-remoto collega gdrive --chiave CHIAVE"
+    echo " Per rivederla da qui: sudo emp-server backup-remoto chiave"
+    echo "================================================================"
+}
+
+# ---------------------------------------------------------------- ripristino
+
+manifest_field() { sed -n "s/^$2=//p" "$1/MANIFEST" | head -n1; }
+
+health_ok() {
+    local _
+    for _ in $(seq 1 30); do
+        curl -fsS --max-time 5 --cacert "$EMP_TLS/ca.crt" --resolve "localhost:443:127.0.0.1" \
+            https://localhost/api/v1/salute >/dev/null 2>&1 && return 0
+        sleep 1
+    done
+    return 1
+}
+
+cmd_ripristina() {
+    require_root ripristina
+    local file='' remote='' yes=0
+    while (($#)); do
+        case $1 in
+            --remoto) [[ $# -ge 2 ]] || die "manca il nome dopo --remoto"; remote=$2; shift 2 ;;
+            --si) yes=1; shift ;;
+            -*) die "opzione sconosciuta: $1" ;;
+            *) file=$1; shift ;;
+        esac
+    done
+    if [[ -n $remote ]]; then
+        [[ $remote =~ ^emp-backup-[a-z0-9.-]+\.tar$ && $remote != *..* ]] || die "nome di backup remoto non valido (vedi: sudo emp-server backup-elenco)"
+        remote_configured || die "nessuna destinazione remota collegata (sudo emp-server backup-remoto collega … --chiave CHIAVE)"
+        install -d -m 0700 -o root -g root "$EMP_BACKUP"
+        file="$EMP_BACKUP/$remote"
+        info "Download e decifratura di $remote da $(remote_description)"
+        rclone_emp copyto "emp-cifrato:$remote" "$file" || die "download non riuscito (chiave sbagliata o destinazione non raggiungibile)"
+        chmod 0600 "$file"
+    fi
+    [[ -n $file && -f $file ]] || die "uso: sudo emp-server ripristina FILE | --remoto NOME  (elenco: sudo emp-server backup-elenco)"
+
+    local work
+    new_temp_dir work "$EMP_DATA"
+    tar -C "$work" -xf "$file" MANIFEST SHA256SUMS database.sql.gz dati.tar.gz 2>/dev/null || die "file di backup non valido"
+    local package
+    package=$(manifest_field "$work" pacchetto)
+    if [[ -n $package ]]; then
+        [[ $package =~ ^emp-server-[0-9A-Za-z.+~-]+\.tar\.gz$ ]] || die "pacchetto non valido nel backup"
+        tar -C "$work" -xf "$file" "$package" || die "pacchetto mancante nel backup"
+    fi
+    ( cd "$work" && sha256sum --quiet --strict -c SHA256SUMS ) || die "backup danneggiato o modificato (SHA256SUMS)"
+    [[ $(manifest_field "$work" formato) == "$BACKUP_FORMAT" ]] || die "formato del backup non supportato"
+    if tar -tzf "$work/dati.tar.gz" | grep -Ev '^(moduli|catalogo|catalogo-locale)(/|$)' | grep -q .; then
+        die "il backup contiene percorsi non ammessi"
+    fi
+
+    local bserver bcore current
+    bserver=$(manifest_field "$work" emp_server)
+    bcore=$(manifest_field "$work" core)
+    current=$(installed_server_version)
+    echo
+    echo "Backup:      $(basename "$file")"
+    echo "             creato il $(manifest_field "$work" creato) sulla macchina $(manifest_field "$work" macchina)"
+    echo "             EMP Server ${bserver}, Core ${bcore}"
+    echo "Questa macchina: $(host_name), EMP Server ${current:-non installato}"
+    echo
+    echo "Database, Core, plugin e cataloghi di EMP verranno SOSTITUITI da quelli del backup."
+    echo "Restano di questa macchina: nome, certificato HTTPS, collegamento a GitHub e ai backup remoti."
+    if [[ -z $package && $bserver != "$current" ]]; then
+        die "il backup non contiene il pacchetto di EMP Server ${bserver:-?}: installare prima quella versione"
+    fi
+    if ((!yes)); then
+        local answer
+        read -r -p "Scrivi RIPRISTINA per continuare: " answer
+        [[ $answer == RIPRISTINA ]] || die "annullato: nessuna modifica"
+    fi
+
+    if emp_database_exists && [[ -f $EMP_MODULES/emp-core/emp-module.json ]]; then
+        info "Backup di sicurezza dello stato attuale, prima di sostituirlo"
+        cmd_backup --etichetta prima-del-ripristino || [[ $? -eq 3 ]] || die "backup di sicurezza non riuscito: ripristino annullato"
+    fi
+
+    local fpm
+    fpm="php$(php_version)-fpm"
+    systemctl stop emp-backup.timer nginx "$fpm" 2>/dev/null || true
+
+    mariadb <<'SQL'
+DROP DATABASE IF EXISTS emp;
+CREATE DATABASE emp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'emp'@'localhost' IDENTIFIED VIA unix_socket;
+GRANT ALL PRIVILEGES ON emp.* TO 'emp'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+    gunzip -c "$work/database.sql.gz" | mariadb emp || die "importazione del database non riuscita"
+    info "Database ripristinato"
+
+    local d
+    # shellcheck disable=SC2086  # elenco fisso di cartelle
+    for d in $EMP_DATA_DIRS; do rm -rf "${EMP_DATA:?}/$d"; done
+    tar -C "$EMP_DATA" -xzf "$work/dati.tar.gz" --same-owner
+    create_dirs
+    info "Core, plugin e cataloghi ripristinati"
+
+    if [[ -n $package && $bserver != "$current" ]]; then
+        info "Installazione di EMP Server ${bserver} dal backup (programmi e configurazione dei servizi)"
+        mkdir "$work/pacchetto"
+        tar -C "$work/pacchetto" -xzf "$work/$package"
+        local dir
+        dir=$(find "$work/pacchetto" -mindepth 1 -maxdepth 1 -type d -name 'emp-server-*' | head -n1)
+        [[ -x $dir/installa.sh ]] || die "pacchetto del backup non valido"
+        EMP_RIPRISTINO=1 "$dir/installa.sh" | sed 's/^/  /'
+    else
+        systemctl start "$fpm" nginx
+        core_cli installa --utente=installer | sed 's/^/  /'
+    fi
+    systemctl start emp-backup.timer 2>/dev/null || true
+    health_ok || die "il Core non risponde dopo il ripristino: controllare $EMP_LOGS"
+    echo
+    info "Ripristino completato: EMP Server ${bserver}, Core ${bcore}, dati del $(manifest_field "$work" creato)"
 }
 
 cmd_moduli() {
@@ -312,8 +656,8 @@ SQL
     journalctl --vacuum-time=1s >/dev/null 2>&1 || true
     info "Registri di prova cancellati"
 
-    # Identità HTTPS e nome DNS aggiuntivo appartengono alla macchina d'origine.
-    rm -rf "$EMP_TLS"
+    # Identità HTTPS, nome DNS aggiuntivo e destinazione dei backup remoti appartengono alla macchina d'origine.
+    rm -rf "$EMP_TLS" "$REMOTE_DIR"
     rm -f "$EMP_CONF_DIR/nome-dns"
     if [[ -f $EMP_CONF_DIR/github.conf ]]; then
         sed -i -E 's/^EMP_NOME_DNS=.*/EMP_NOME_DNS=/' "$EMP_CONF_DIR/github.conf"
@@ -415,7 +759,7 @@ cmd_collega_github() {
 }
 
 usage() {
-    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -427,7 +771,10 @@ main() {
         codice-setup) cmd_codice_setup ;;
         recupero-tecnico) cmd_recupero_tecnico "$@" ;;
         certificato) cmd_certificato "$@" ;;
-        backup) cmd_backup ;;
+        backup) cmd_backup "$@" ;;
+        backup-elenco) cmd_backup_elenco ;;
+        backup-remoto) cmd_backup_remoto "$@" ;;
+        ripristina) cmd_ripristina "$@" ;;
         moduli) cmd_moduli ;;
         azzera) cmd_azzera "$@" ;;
         collega-github) cmd_collega_github "$@" ;;

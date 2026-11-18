@@ -1,5 +1,5 @@
 [Unit]
-Description=EMP Server — backup del database e della configurazione
+Description=EMP Server — backup completo di EMP (e copia cifrata remota, se collegata)
 After=mariadb.service
 
 [Service]

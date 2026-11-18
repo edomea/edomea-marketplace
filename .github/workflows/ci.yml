@@ -148,8 +148,21 @@ jobs:
           if sudo -u emp cat /etc/emp/tls/ca.key; then exit 1; fi
           # Gestione dalla console.
           sudo emp-server stato
+          # Backup completo con copia cifrata su una destinazione "locale" (al posto di Google Drive).
+          sudo emp-server backup-remoto collega locale /srv/emp-remoto | tee "$RUNNER_TEMP/remoto.log"
+          grep -oE 'EMP-BK(-[A-Z2-7]{6}){5}' "$RUNNER_TEMP/remoto.log" | head -1 > "$RUNNER_TEMP/chiave-backup"
+          test -s "$RUNNER_TEMP/chiave-backup"
           sudo emp-server backup
-          sudo sh -c 'ls /var/lib/emp/backup/*/database.sql.gz'
+          BK=$(sudo sh -c 'ls -t /var/lib/emp/backup/emp-backup-*.tar' | head -1)
+          sudo tar -tf "$BK" | tee /dev/stderr | grep -q "^emp-server-$(cat server/VERSIONE).tar.gz$"
+          sudo tar -xOf "$BK" MANIFEST | grep -q "^emp_server=$(cat server/VERSIONE)$"
+          # Il backup non contiene l'identità della macchina (certificato e sua chiave).
+          if sudo tar -xOf "$BK" dati.tar.gz | tar -tz | grep -E 'tls|\.key$'; then exit 1; fi
+          # Sulla destinazione remota il file è cifrato: non è un archivio leggibile.
+          REMOTO=$(sudo sh -c 'ls /srv/emp-remoto/EMP-backup/emp-backup-*.tar.bin' | head -1)
+          test -n "$REMOTO"
+          if sudo tar -tf "$REMOTO" >/dev/null 2>&1; then exit 1; fi
+          sudo emp-server backup-elenco | tee /dev/stderr | grep 'emp-backup-' >/dev/null
           printf 'Recupero-Console-CI-2026\n' | sudo emp-server recupero-tecnico tecnico | grep -q 'Nuova Recovery Key: EMP-'
           curl -fsS "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
           sudo ufw status | tee /dev/stderr | grep -q '443/tcp'
@@ -160,11 +173,34 @@ jobs:
           cd "$RUNNER_TEMP"/inst/emp-server-*
           sudo ./installa.sh | tee "$RUNNER_TEMP/installa-2.log"
           if grep -q 'Primo setup' "$RUNNER_TEMP/installa-2.log"; then exit 1; fi
+          # Prima di ogni aggiornamento: backup completo automatico.
+          sudo sh -c "ls /var/lib/emp/backup/emp-backup-*-prima-di-$(cat VERSIONE).tar"
           sudo systemctl restart mariadb php*-fpm nginx
           sleep 2
           sudo emp-server moduli | grep -q emp-esempio
           curl -fsS --cacert "$RUNNER_TEMP/emp-ca.crt" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json' \
             -X POST "https://localhost/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
+      - name: Ripristino sulla stessa macchina
+        run: |
+          set -euo pipefail
+          BK=$(sudo sh -c 'ls -t /var/lib/emp/backup/emp-backup-*.tar' | head -1)
+          # Guasto simulato: utenti cancellati e plugin rimosso.
+          sudo mariadb emp -e 'DELETE FROM emp_core_sessions; DELETE FROM emp_core_users'
+          sudo rm -rf /var/lib/emp/moduli/emp-esempio
+          # Senza conferma (nessun terminale, niente --si) non tocca nulla; file alterato rifiutato.
+          if sudo emp-server ripristina "$BK" </dev/null; then exit 1; fi
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 0
+          # Backup alterato (database sostituito senza aggiornare le impronte): rifiutato.
+          A=$(mktemp -d)
+          sudo sh -c "cd '$A' && tar -xf '$BK' && echo 'DROP DATABASE emp;' | gzip > database.sql.gz && tar -cf alterato.tar MANIFEST SHA256SUMS database.sql.gz dati.tar.gz emp-server-*.tar.gz"
+          if sudo emp-server ripristina "$A/alterato.tar" --si; then exit 1; fi
+          sudo emp-server ripristina "$BK" --si
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+          sudo emp-server moduli | grep -q emp-esempio
+          curl -fsS --cacert "$RUNNER_TEMP/emp-ca.crt" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json' \
+            -X POST "https://localhost/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
+          # Prima di sostituire i dati è stato salvato lo stato attuale.
+          sudo sh -c 'ls /var/lib/emp/backup/emp-backup-*-prima-del-ripristino.tar'
       - name: Disinstallazione (i dati restano) e reinstallazione
         run: |
           set -euo pipefail
@@ -197,6 +233,8 @@ jobs:
           if sudo sh -c 'ls /var/lib/emp/backup/*/database.sql.gz' 2>/dev/null; then exit 1; fi
           test "$(sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -fingerprint -sha256)" != "$OLD_FP"
           sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -text | grep -q 'DNS:cliente-prova'
+          # Anche il collegamento ai backup remoti apparteneva al master.
+          sudo test ! -e /etc/emp/backup-remoto
           # Di nuovo pronto per il primo setup, con il codice mostrato da azzera.
           CA=$RUNNER_TEMP/ca-cliente.crt
           sudo cat /etc/emp/tls/ca.crt > "$CA"
@@ -205,6 +243,29 @@ jobs:
           SETUP_CODE=$(grep -oE 'EMP-[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}' "$RUNNER_TEMP/azzera.log" | tail -1)
           curl -fsS "${L[@]}" -X POST https://cliente-prova/api/v1/accesso/setup \
             -d "$(printf '{"codice":"%s","username":"tecnico2","nome":"Tecnico cliente","password":"Chiave-Cliente-CI-2026"}' "$SETUP_CODE")" | grep -q '"recovery_key":"EMP-'
+          sudo emp-server stato
+      - name: Ripristino su una macchina nuova dal backup remoto cifrato
+        run: |
+          set -euo pipefail
+          # La macchina azzerata (cliente-prova) fa da "nuova installazione": riprende i dati
+          # del server originale dalla destinazione remota, con la chiave dei backup.
+          NEW_FP=$(sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -fingerprint -sha256)
+          sudo emp-server backup-remoto collega locale /srv/emp-remoto --chiave EMP-BK-AAAAAA-AAAAAA-AAAAAA-AAAAAA-AAAAAA
+          ORIG=$(sudo sh -c 'ls /srv/emp-remoto/EMP-backup/' | grep -v cliente-prova | grep -v prima-del-ripristino | sed 's/\.bin$//' | sort | tail -1)
+          test -n "$ORIG"
+          # Chiave sbagliata: il backup non si apre e non cambia nulla.
+          if sudo emp-server ripristina --remoto "$ORIG" --si; then exit 1; fi
+          test "$(sudo mariadb -N -e 'SELECT username FROM emp.emp_core_users')" = tecnico2
+          sudo emp-server backup-remoto collega locale /srv/emp-remoto --chiave "$(cat "$RUNNER_TEMP/chiave-backup")"
+          sudo emp-server ripristina --remoto "$ORIG" --si | tee "$RUNNER_TEMP/ripristino.log"
+          # Dati del server originale; identità (nome, certificato) della macchina nuova.
+          test "$(sudo mariadb -N -e 'SELECT username FROM emp.emp_core_users')" = tecnico
+          sudo emp-server moduli | grep -q emp-esempio
+          test "$(hostname -s)" = cliente-prova
+          test "$(sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -fingerprint -sha256)" = "$NEW_FP"
+          CA=$RUNNER_TEMP/ca-cliente.crt
+          curl -fsS --cacert "$CA" --resolve "cliente-prova:443:127.0.0.1" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json' \
+            -X POST https://cliente-prova/api/v1/accesso/login -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
           sudo emp-server stato
       - name: Registri in caso di errore
         if: failure()

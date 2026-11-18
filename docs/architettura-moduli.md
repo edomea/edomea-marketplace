@@ -163,7 +163,7 @@ I plugin si installano **a mano dal Core**: il Tecnico sceglie il plugin e preme
 | Fonte | Cartella | Chi la riempie | Rete |
 |---|---|---|---|
 | Catalogo di EMP Server | `catalog_dir` (`/var/lib/emp/catalogo`, di root) | `installa.sh`, dal pacchetto EMP Server | no |
-| **Caricamento manuale** | `local_catalog_dir` (`/var/lib/emp/catalogo-locale`, utente `emp`) | il Tecnico, dal browser (*Carica un pacchetto*) | no |
+| **Caricamento manuale** | `local_catalog_dir` (`/var/lib/emp/catalogo-locale`, utente `emp`) | il Tecnico, dal browser (*Carica un pacchetto*) oppure via scp in `arrivals_dir` (`/var/lib/emp/arrivi/plugin`) e poi *Aggiungi* | no |
 | **GitHub, facoltativa** | `local_catalog_dir` | il Tecnico, importando una release pubblicata (*Da GitHub*) | solo durante l'importazione |
 
 Caricare o importare **non installa**: il pacchetto entra nel catalogo locale e il plugin compare nell'elenco come installabile o aggiornabile.

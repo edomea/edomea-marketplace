@@ -53,7 +53,7 @@ Nell'installazione guidata di Ubuntu:
 | Tipo di installazione | **Ubuntu Server** (non *minimized*) |
 | Rete | Vedi sotto: **indirizzo fisso consigliato** |
 | Disco | *Use an entire disk* (predefinito) |
-| Profilo | nome del server: **`emp-server`**; un utente amministratore con password robusta |
+| Profilo | nome del server: **`emp-server`**; un utente amministratore con **nome personale** (non `emp`, riservato a EMP) e password robusta |
 | SSH | **Install OpenSSH server**: sì, per gestire il Server da un altro PC |
 | Snap aggiuntivi | nessuno |
 
@@ -89,22 +89,22 @@ Per copiarlo sulla VM ci sono due modi.
 
 **Dal PC Windows** (PowerShell, nella cartella dove si trova il file). `scp` è già incluso in Windows 11:
 ```
-scp emp-server-0.6.0-alpha.6.tar.gz utente@IP-DEL-SERVER:
+scp emp-server-0.6.0-alpha.7.tar.gz utente@IP-DEL-SERVER:
 ```
 
 **Direttamente sulla VM**, se ha accesso a Internet:
 ```
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.6/emp-server-0.6.0-alpha.6.tar.gz
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.6/emp-server-0.6.0-alpha.6.tar.gz.sha256
-sha256sum -c emp-server-0.6.0-alpha.6.tar.gz.sha256
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.7/emp-server-0.6.0-alpha.7.tar.gz
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.7/emp-server-0.6.0-alpha.7.tar.gz.sha256
+sha256sum -c emp-server-0.6.0-alpha.7.tar.gz.sha256
 ```
 
 ### 2.2 Eseguire l'installazione
 
 Sulla VM, dalla console o via SSH (`ssh utente@IP-DEL-SERVER`):
 ```
-tar -xzf emp-server-0.6.0-alpha.6.tar.gz
-cd emp-server-0.6.0-alpha.6
+tar -xzf emp-server-0.6.0-alpha.7.tar.gz
+cd emp-server-0.6.0-alpha.7
 sudo ./installa.sh
 ```
 
@@ -182,8 +182,9 @@ Dopo il setup, il Tecnico crea gli amministratori e installa i plugin dalla pagi
 | `/var/lib/emp/moduli/emp-core/` | EMP Core | **root**: il processo web non può modificarlo |
 | `/var/lib/emp/moduli/<plugin>/` | plugin installati dalla pagina web | `emp` |
 | `/var/lib/emp/catalogo/` | plugin installabili, con impronte SHA-256 | root |
-| `/var/lib/emp/backup/` | backup completi di EMP (ultimi 14) | root |
+| `/var/lib/emp/backup/` | backup completi di EMP (ultimi 14) | root, leggibili dal gruppo emp-file |
 | `/var/lib/emp/pacchetto/` | pacchetto della versione installata (incluso nei backup) | root |
+| `/var/lib/emp/arrivi/plugin/` | ZIP dei plugin caricati via scp | emp, gruppo emp-file |
 | `/etc/emp/backup-remoto/` | destinazione remota e chiave dei backup (della macchina) | root |
 | `/var/lib/emp/precedenti/` | ultime 5 versioni del Core sostituite | root |
 | `/var/log/emp/`, `/var/log/nginx/emp-*.log` | registri | |
@@ -219,6 +220,8 @@ Sul Server, dalla console o via SSH:
 | `sudo emp-server backup-elenco` | Backup locali e remoti |
 | `sudo emp-server backup-remoto collega gdrive` | Copia cifrata di ogni backup su Google Drive (anche `sftp`, `locale`) |
 | `sudo emp-server ripristina FILE` / `--remoto NOME` | Rimette EMP com'era nel backup, sulla stessa macchina o su una nuova |
+| `sudo emp-server accesso-scp NOME` | L'utente NOME scarica i backup e carica i plugin via scp (`--togli` per revocare) |
+| `sudo emp-server elimina-vecchio-utente` | Elimina l'account personale `emp`, se Ubuntu è stato installato con quel nome (§ 5.x) |
 | `sudo emp-server moduli` | Core e plugin installati |
 | `sudo emp-server azzera --nome NOME` | Total reset di un clone del master per un nuovo cliente (vedi sotto) |
 | `sudo emp-server collega-github` | Collega il Server a GitHub per gli aggiornamenti |
@@ -235,6 +238,23 @@ L'aggiornamento:
 Le versioni di EMP non vengono mai riutilizzate.
 
 Per aggiornare Ubuntu: `sudo apt update && sudo apt upgrade`. Gli aggiornamenti di sicurezza sono già automatici.
+
+### Utente di EMP e accesso scp
+
+EMP gira con l'utente di sistema **`emp`**: non entra in SSH, non usa `sudo`, non ha una cartella personale. Chi gestisce il Server entra con il **proprio** utente.
+
+**Se Ubuntu è stato installato con l'utente `emp`**, EMP userebbe un account personale con permessi di amministratore: `installa.sh` ed `emp-server stato` lo segnalano. Per correggere:
+1. crea il tuo utente: `sudo adduser NOME && sudo usermod -aG sudo NOME`;
+2. rientra con quello (`ssh NOME@IP-DEL-SERVER`) e chiudi le sessioni di `emp`;
+3. `sudo emp-server elimina-vecchio-utente`, poi scrivi `ELIMINA`.
+
+L'account viene cancellato con la sua cartella. Al suo posto EMP riceve un utente di sistema con lo stesso nome; dati, database e plugin non cambiano. Il comando si rifiuta se non viene eseguito con `sudo` da un altro amministratore o se `emp` ha ancora sessioni aperte.
+
+**Accesso scp per backup e plugin.** `sudo emp-server accesso-scp NOME` abilita l'utente NOME, a partire dal suo accesso SSH successivo:
+- **scarica i backup** dal PC: `scp NOME@IP-DEL-SERVER:/var/lib/emp/backup/emp-backup-….tar .`
+- **carica i plugin** dal PC: `scp mio-plugin.zip NOME@IP-DEL-SERVER:/var/lib/emp/arrivi/plugin/`
+
+Gli ZIP caricati compaiono nella pagina **Plugin** del Tecnico, sezione *Arrivati via scp*. *Aggiungi* li controlla come un caricamento dal browser e li mette nel catalogo locale; poi si installano col pulsante. `--togli` revoca l'accesso.
 
 ### Backup e ripristino
 
@@ -269,7 +289,7 @@ Poi apri in Chrome il link `http://127.0.0.1:53682/…` che compare e accedi con
 **Ripristino sulla stessa macchina**, per esempio dopo un aggiornamento andato male:
 ```
 sudo emp-server backup-elenco
-sudo emp-server ripristina /var/lib/emp/backup/emp-backup-…-prima-di-0.6.0-alpha.6.tar
+sudo emp-server ripristina /var/lib/emp/backup/emp-backup-…-prima-di-0.6.0-alpha.7.tar
 ```
 Chiede di scrivere `RIPRISTINA`. Prima di sostituire i dati salva lo stato attuale (backup `…-prima-del-ripristino`). Se il backup è di un'altra versione, reinstalla quella versione dal pacchetto contenuto nel backup.
 

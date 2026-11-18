@@ -9,6 +9,7 @@ use Emp\Core\Kernel;
 use Emp\Core\Module\Installer;
 use Emp\Core\Module\Registry;
 use Emp\Core\Module\Resolver;
+use Emp\Core\Plugin\Arrivals;
 use Emp\Core\Plugin\Catalog;
 use Emp\Core\Plugin\CurlHttpClient;
 use Emp\Core\Plugin\GitHubSource;
@@ -345,6 +346,32 @@ final class PluginSourcesTest extends TestCase
         }
     }
 
+    // ------------------------------------------------------------ arrivi via scp
+
+    public function testArrivalsListAddAndDelete(): void
+    {
+        $dir = Fixtures::tempDir();
+        copy($this->esempioZip(), $dir . '/emp-esempio.zip');
+        file_put_contents($dir . '/note.txt', 'non uno zip');
+        symlink('/etc/passwd', $dir . '/collegamento.zip');
+        $arrivals = new Arrivals($dir);
+        self::assertSame(['emp-esempio.zip'], array_column($arrivals->list(), 'nome'));
+
+        foreach (['../etc/passwd', 'collegamento.zip', 'note.txt', 'assente.zip', '.zip'] as $bad) {
+            try {
+                $arrivals->path($bad);
+                self::fail("Accettato: {$bad}");
+            } catch (PackageException) {
+                self::addToAssertionCount(1);
+            }
+        }
+        $entry = $this->manager()->upload($arrivals->path('emp-esempio.zip'), 'Arrivato via scp (emp-esempio.zip)');
+        self::assertTrue($entry['nuovo']);
+        $arrivals->delete('emp-esempio.zip');
+        self::assertSame([], $arrivals->list());
+        self::assertTrue(is_link($dir . '/collegamento.zip'), 'il collegamento non va seguito né eliminato');
+    }
+
     // ------------------------------------------------------------ API HTTP
 
     public function testHttpUploadAndGitHubRoutes(): void
@@ -387,9 +414,23 @@ final class PluginSourcesTest extends TestCase
         self::assertSame(200, $imp->status, $imp->body);
         self::assertSame(200, $kernel->handle(new Request('POST', '/api/v1/plugin/emp-esempio/installa', $auth, '127.0.0.1'))->status);
 
+        // Arrivi via scp: elenco, aggiunta al catalogo locale (file eliminato), nome non valido rifiutato.
+        $arrivi = Fixtures::tempDir();
+        $kernelScp = new Kernel($this->modules, $this->installer, new Clock(), null, $this->local, $http, null, $arrivi);
+        $kernelScp->plugins()->removePackage('emp-esempio');
+        copy($zip, $arrivi . '/emp-esempio.zip');
+        $list = json_decode($kernelScp->handle(new Request('GET', '/api/v1/plugin/arrivi', $auth, '127.0.0.1'))->body, true);
+        self::assertSame('emp-esempio.zip', $list['file'][0]['nome']);
+        self::assertSame(409, $kernelScp->handle(new Request('POST', '/api/v1/plugin/arrivi/aggiungi', $auth, '127.0.0.1', (string) json_encode(['file' => '../x.zip'])))->status);
+        $add = $kernelScp->handle(new Request('POST', '/api/v1/plugin/arrivi/aggiungi', $auth, '127.0.0.1', (string) json_encode(['file' => 'emp-esempio.zip'])));
+        self::assertSame(200, $add->status, $add->body);
+        self::assertFileDoesNotExist($arrivi . '/emp-esempio.zip');
+        // Senza cartella configurata la funzione non è disponibile.
+        self::assertSame(409, $kernel->handle(new Request('GET', '/api/v1/plugin/arrivi', $auth, '127.0.0.1'))->status);
+
         // Tracciabilità: caricamento, rimozione, impostazione e importazione registrati.
         $actions = $this->pdo->query("SELECT action FROM emp_core_audit WHERE action LIKE 'plugin.%' ORDER BY occurred_at")->fetchAll(\PDO::FETCH_COLUMN);
-        foreach (['plugin.pacchetto_caricato', 'plugin.pacchetto_rimosso', 'plugin.sorgente_github', 'plugin.pacchetto_importato'] as $a) {
+        foreach (['plugin.pacchetto_caricato', 'plugin.pacchetto_rimosso', 'plugin.sorgente_github', 'plugin.pacchetto_importato', 'plugin.pacchetto_arrivato'] as $a) {
             self::assertContains($a, $actions);
         }
     }

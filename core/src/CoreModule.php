@@ -47,6 +47,9 @@ use Emp\Core\Plugin\PackageException;
  *   POST /api/v1/plugin/carica                 pacchetto ZIP nel corpo (application/zip) → catalogo locale;
  *                                              intestazione facoltativa X-EMP-Impronta: SHA-256 atteso
  *   POST /api/v1/plugin/{id}/rimuovi-pacchetto toglie il pacchetto dal catalogo locale
+ *   GET  /api/v1/plugin/arrivi                 ZIP caricati via scp in /var/lib/emp/arrivi/plugin
+ *   POST /api/v1/plugin/arrivi/aggiungi        {file}: ZIP arrivato → catalogo locale (stessi controlli), poi eliminato
+ *   POST /api/v1/plugin/arrivi/elimina         {file}: elimina lo ZIP arrivato
  *
  * Sorgente GitHub facoltativa (solo Tecnico, solo HTTPS; vedi docs/architettura-moduli.md)
  *   GET  /api/v1/plugin/github                 impostazioni (attiva, repository)
@@ -215,6 +218,42 @@ final class CoreModule implements ModuleInterface
             $kernel->audit()->record($user->username, 'emp-core', 'plugin.pacchetto_rimosso', 'plugin', $q->param('id'));
 
             return Response::json(['ok' => true, 'operazioni' => ['Pacchetto tolto dal catalogo locale. Il plugin eventualmente installato resta installato.']]);
+        }));
+
+        // ---- Plugin: pacchetti arrivati via scp -----------------------------------------
+        $arrivals = static function () use ($kernel) {
+            return $kernel->arrivals() ?? throw new PackageException('Cartella degli arrivi non configurata: rieseguire l\'installazione di EMP Server');
+        };
+
+        $r->add('GET', '/api/v1/plugin/arrivi', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($arrivals, $access, $q): Response {
+            self::requireUser($access(), $q, false, Role::TECNICO);
+            $a = $arrivals();
+
+            return Response::json(['cartella' => $a->dir(), 'file' => $a->list()]);
+        }));
+
+        $r->add('POST', '/api/v1/plugin/arrivi/aggiungi', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($kernel, $arrivals, $access, $q): Response {
+            $user = self::requireUser($access(), $q, false, Role::TECNICO);
+            $a = $arrivals();
+            $name = $q->input('file');
+            $entry = $kernel->plugins()->upload($a->path($name), "Arrivato via scp ({$name})");
+            $a->delete($name);
+            if ($entry['nuovo']) {
+                $kernel->audit()->record($user->username, 'emp-core', 'plugin.pacchetto_arrivato', 'plugin', $entry['id'], 0, null, self::summary($entry));
+            }
+
+            return Response::json(['ok' => true, 'pacchetto' => $entry, 'operazioni' => [$entry['nuovo']
+                ? sprintf('Pacchetto %s %s aggiunto al catalogo locale (SHA-256 %s). Installarlo dall\'elenco.', $entry['id'], $entry['version'], $entry['sha256'])
+                : sprintf('Pacchetto %s %s già presente nel catalogo locale.', $entry['id'], $entry['version'])]]);
+        }));
+
+        $r->add('POST', '/api/v1/plugin/arrivi/elimina', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($kernel, $arrivals, $access, $q): Response {
+            $user = self::requireUser($access(), $q, false, Role::TECNICO);
+            $name = $q->input('file');
+            $arrivals()->delete($name);
+            $kernel->audit()->record($user->username, 'emp-core', 'plugin.arrivo_eliminato', 'file', $name);
+
+            return Response::json(['ok' => true, 'operazioni' => ["{$name} eliminato dagli arrivi."]]);
         }));
 
         // ---- Plugin: sorgente GitHub facoltativa ---------------------------------------

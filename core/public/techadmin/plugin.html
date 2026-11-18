@@ -46,6 +46,16 @@
     <tbody><tr><td colspan="7">Caricamento...</td></tr></tbody>
   </table>
 
+  <section class="box" id="arrivi-box" hidden>
+    <h3>Arrivati via scp</h3>
+    <p class="note">ZIP copiati dal PC con <code>scp mio-plugin.zip NOME@IP-DEL-SERVER:<span id="arrivi-cartella">/var/lib/emp/arrivi/plugin</span>/</code>
+      (accesso abilitato con <code>sudo emp-server accesso-scp NOME</code>). <em>Aggiungi</em> li controlla come un caricamento dal browser e li mette nel catalogo locale.</p>
+    <table id="arrivi">
+      <thead><tr><th>File</th><th>Dimensione</th><th>Arrivato</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </section>
+
   <section class="box" id="github-box">
     <h3>Da GitHub (facoltativo)</h3>
     <p class="note">Importa nel catalogo locale i plugin di una <strong>release pubblicata</strong> del repository indicato

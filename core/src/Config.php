@@ -17,7 +17,8 @@ use Emp\Core\Support\Clock;
  *    'prefix' => 'emp_', 'timezone' => 'Europe/Rome', 'modules_dir' => '/…/modules',
  *    'catalog_dir' => '/…/catalogo',          // facoltativo: catalogo di EMP Server (sola lettura)
  *    'local_catalog_dir' => '/…/catalogo-locale',  // facoltativo: pacchetti caricati a mano o importati da GitHub
- *    'server_version' => '0.6.0-alpha.5']         // facoltativo: versione di EMP Server, mostrata nelle pagine
+ *    'server_version' => '0.6.0-alpha.7',         // facoltativo: versione di EMP Server, mostrata nelle pagine
+ *    'arrivals_dir' => '/…/arrivi/plugin']        // facoltativo: plugin caricati via scp
  */
 final class Config
 {
@@ -75,6 +76,7 @@ final class Config
         $catalog = $this->values['catalog_dir'] ?? null;
         $local = $this->values['local_catalog_dir'] ?? null;
         $server = $this->values['server_version'] ?? null;
+        $arrivals = $this->values['arrivals_dir'] ?? null;
 
         return new Kernel(
             $this->modulesDir(),
@@ -84,6 +86,7 @@ final class Config
             is_string($local) && $local !== '' ? $local : null,
             null,
             is_string($server) && preg_match('/^[0-9A-Za-z.+~-]{1,40}$/', $server) ? $server : null,
+            is_string($arrivals) && $arrivals !== '' ? $arrivals : null,
         );
     }
 }

@@ -36,10 +36,24 @@ jobs:
     if: github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    outputs:
+      versione: ${{ steps.versione.outputs.versione }}
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+      # Il titolo dell'esecuzione è fissato alla partenza (prima di leggere il codice): la versione
+      # compare nel nome del passaggio di installazione e in cima al riepilogo.
+      - name: Versione da installare
+        id: versione
+        env:
+          SERVER: ${{ inputs.server }}
+        run: |
+          set -euo pipefail
+          V=$(tr -d '[:space:]' < server/VERSIONE)
+          [[ $V =~ ^[0-9A-Za-z.+~-]{1,40}$ ]] || { echo "::error::server/VERSIONE non valido"; exit 1; }
+          echo "versione=$V" >> "$GITHUB_OUTPUT"
+          echo "## EMP Server $V → $SERVER" >> "$GITHUB_STEP_SUMMARY"
       - name: Controllo degli script
         run: shellcheck -x server/installa.sh server/emp-server server/disinstalla.sh tools/build-server.sh server/github/emp-installa-da-github server/github/prepara-runner.sh
       - name: Costruzione del pacchetto
@@ -66,7 +80,7 @@ jobs:
           retention-days: 7
 
   installa:
-    name: Installazione sul Server (${{ inputs.server }})
+    name: Installazione di EMP Server ${{ needs.pacchetto.outputs.versione }} su ${{ inputs.server }}
     needs: pacchetto
     runs-on: [self-hosted, linux, "${{ inputs.server }}"]
     # Su GitHub si può richiedere un'approvazione esplicita per questo ambiente.

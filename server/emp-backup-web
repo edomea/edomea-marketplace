@@ -1,0 +1,808 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/*
+ * EMP Server — esecutore delle richieste della pagina Backup di /techadmin.
+ *
+ * Il Core gira come utente "emp", senza permessi sulla macchina e con l'esecuzione di
+ * comandi disattivata in PHP-FPM. Per i backup deposita una richiesta (un file di testo,
+ * scritto in preparazione/ e poi spostato) in /var/lib/emp/backup-web/richieste/; systemd (emp-backup-web.path) avvia questo
+ * programma come root, che:
+ *   - accetta solo le azioni previste, con valori controllati uno per uno;
+ *   - le esegue con i comandi di emp-server (backup, impostazioni, collegamento della
+ *     destinazione remota, chiave, download, ripristino);
+ *   - scrive l'esito in risposte/<id>.json (letto e cancellato dal Core), lo stato in
+ *     stato.json e l'avanzamento dell'operazione in corso in lavoro.json.
+ * I file da scaricare vanno in /var/lib/emp/scaricamenti/ (letti solo da Nginx, per un'ora).
+ *
+ *   emp-backup-web            esegue le richieste in attesa (avviato da systemd)
+ *   emp-backup-web pulizia    toglie i file da scaricare scaduti
+ *
+ * Installato da installa.sh in /opt/emp/server.
+ */
+
+const VERSION_FORMAT = 1;
+const MAX_REQUEST_BYTES = 16384;
+const REQUEST_MAX_AGE = 3600;        // richieste più vecchie: scartate
+const DOWNLOAD_TTL = 3600;           // file da scaricare disponibili per un'ora
+const KEY_PATTERN = '/EMP-BK(-[A-Z2-7]{6}){5}/';
+const NAME_PATTERN = '/^emp-backup-[a-z0-9.-]{1,160}\.tar$/';
+const USER_PATTERN = '/^[a-z0-9][a-z0-9._-]{2,63}$/';
+const ID_PATTERN = '/^[0-9a-f]{32}$/';
+const AUTH_PORT = 53682;
+
+final class Worker
+{
+    private string $web;
+    private string $requests;
+    private string $responses;
+    private string $work;
+    private string $downloads;
+    private string $backups;
+    private string $empServer;
+    private string $rclone;
+    private string $authDir;
+    private bool $useSystemd;
+    /** @var array<string, mixed>|null */
+    private ?array $job = null;
+    private float $jobWritten = 0.0;
+
+    public function __construct()
+    {
+        $data = rtrim(getenv('EMP_WEB_DATA') ?: '/var/lib/emp', '/');
+        $this->web = $data . '/backup-web';
+        $this->requests = $this->web . '/richieste';
+        $this->responses = $this->web . '/risposte';
+        $this->work = $this->web . '/lavorazione';
+        $this->downloads = $data . '/scaricamenti';
+        $this->backups = $data . '/backup';
+        $this->empServer = getenv('EMP_WEB_SERVER_CMD') ?: '/usr/local/sbin/emp-server';
+        $this->rclone = getenv('EMP_WEB_RCLONE') ?: 'rclone';
+        $this->authDir = getenv('EMP_WEB_AUTH_DIR') ?: '/run/emp-gdrive';
+        $this->useSystemd = getenv('EMP_WEB_SYSTEMD') !== '0';
+    }
+
+    public function main(array $argv): int
+    {
+        umask(0077);
+        if (!is_dir($this->requests) || !is_dir($this->work)) {
+            fwrite(STDERR, "cartelle della pagina Backup assenti: rieseguire installa.sh\n");
+
+            return 1;
+        }
+        // Un solo esecutore alla volta (anche la pulizia notturna).
+        $lock = fopen($this->work . '/.blocco', 'c');
+        if ($lock === false || !flock($lock, LOCK_EX)) {
+            return 1;
+        }
+        $this->cleanDownloads();
+        if (($argv[1] ?? '') === 'pulizia') {
+            return 0;
+        }
+        // Le richieste arrivate durante un'operazione lunga vengono eseguite nello stesso giro.
+        for ($round = 0; $round < 50; $round++) {
+            $pending = $this->pending();
+            if ($pending === []) {
+                break;
+            }
+            foreach ($pending as $file) {
+                $this->process($file);
+            }
+        }
+        $this->writeState();
+
+        return 0;
+    }
+
+    /** @return list<string> richieste in attesa, dalla più vecchia */
+    private function pending(): array
+    {
+        $files = [];
+        foreach (scandir($this->requests) ?: [] as $name) {
+            if (preg_match('/^[0-9a-f]{32}\.req$/', $name)) {
+                $files[$name] = @filemtime($this->requests . '/' . $name) ?: 0;
+            } elseif ($name !== '.' && $name !== '..') {
+                // Altro (il Core prepara le richieste in preparazione/): via, o systemd ripartirebbe di continuo.
+                $path = $this->requests . '/' . $name;
+                is_dir($path) && !is_link($path) ? @rmdir($path) : @unlink($path);
+            }
+        }
+        asort($files);
+
+        return array_keys($files);
+    }
+
+    // ------------------------------------------------------------------ richieste
+
+    private function process(string $name): void
+    {
+        // Spostata subito nella cartella di root: il Core non può più cambiarla (né sostituirla con un collegamento).
+        $file = $this->work . '/' . $name;
+        if (!@rename($this->requests . '/' . $name, $file)) {
+            return;
+        }
+        $id = substr($name, 0, 32);
+        $request = $this->readRequest($file);
+        @unlink($file);
+        if ($request === null) {
+            return;
+        }
+        $action = $request['azione'];
+        $user = $request['utente'];
+        try {
+            $result = $this->dispatch($id, $action, $user, $request);
+            $this->respond($id, $user, $action, true, $result['messaggio'], $result['dati'] ?? []);
+        } catch (Failure $e) {
+            $this->respond($id, $user, $action, false, $e->getMessage());
+        } catch (\Throwable $e) {
+            fwrite(STDERR, '[emp-backup-web] ' . $e::class . ': ' . $e->getMessage() . "\n");
+            $this->respond($id, $user, $action, false, 'Errore imprevisto: vedere il registro (journalctl -u emp-backup-web)');
+        } finally {
+            $this->finishJob();
+        }
+    }
+
+    /** @return array<string, string>|null */
+    private function readRequest(string $file): ?array
+    {
+        if (is_link($file) || !is_file($file) || filesize($file) > MAX_REQUEST_BYTES) {
+            return null;
+        }
+        $values = [];
+        foreach (explode("\n", (string) file_get_contents($file, false, null, 0, MAX_REQUEST_BYTES)) as $line) {
+            if ($line === '') {
+                continue;
+            }
+            if (!preg_match('/^([a-z_]{1,32})=(.{0,4096})$/', $line, $m) || isset($values[$m[1]])) {
+                return null;
+            }
+            $values[$m[1]] = $m[2];
+        }
+        if (!isset($values['azione'], $values['utente'], $values['creato'])
+            || !preg_match('/^[a-z_]{1,32}$/', $values['azione'])
+            || !preg_match(USER_PATTERN, $values['utente'])
+            || !ctype_digit($values['creato'])
+            || abs(time() - (int) $values['creato']) > REQUEST_MAX_AGE) {
+            return null;
+        }
+
+        return $values;
+    }
+
+    /**
+     * @param array<string, string> $r
+     * @return array{messaggio: string, dati?: array<string, mixed>}
+     */
+    private function dispatch(string $id, string $action, string $user, array $r): array
+    {
+        switch ($action) {
+            case 'aggiorna':
+                return ['messaggio' => 'Stato aggiornato.'];
+
+            case 'backup':
+                $this->startJob($id, $action, $user, 'Backup di EMP');
+                $rc = $this->runJob(['backup']);
+                if ($rc === 3) {
+                    return ['messaggio' => 'Backup eseguito su questa macchina; copia remota NON riuscita (vedere il dettaglio).'];
+                }
+                $this->expectOk($rc, 'Backup non riuscito');
+
+                return ['messaggio' => 'Backup eseguito.'];
+
+            case 'impostazioni':
+                $args = ['backup-impostazioni'];
+                $args[] = '--ora';
+                $args[] = $this->field($r, 'ora', '/^([01][0-9]|2[0-3]):[0-5][0-9]$/', 'Orario non valido');
+                $args[] = '--notturno';
+                $args[] = $this->field($r, 'notturno', '/^(si|no)$/', 'Valore non valido');
+                $args[] = '--conserva';
+                $args[] = $this->number($r, 'conserva_locali', 90, 'Backup locali da conservare: da 1 a 90');
+                $args[] = '--conserva-remoti';
+                $args[] = $this->number($r, 'conserva_remoti', 365, 'Backup remoti da conservare: da 1 a 365');
+                [$rc, $out] = $this->runQuiet($args);
+                $this->expectOk($rc, 'Impostazioni non salvate', $out);
+
+                return ['messaggio' => 'Impostazioni dei backup salvate.'];
+
+            case 'gdrive_avvia':
+                return $this->googleStart($r);
+
+            case 'gdrive_completa':
+                $this->startJob($id, $action, $user, 'Collegamento a Google Drive');
+
+                return $this->googleComplete($r);
+
+            case 'sftp':
+                $dest = $this->field($r, 'destinazione', '/^[A-Za-z0-9._-]{1,64}@[A-Za-z0-9.-]{1,253}(:[0-9]{1,5})?$/', 'Destinazione SFTP non valida (utente@server[:porta])');
+                $password = base64_decode($r['password_b64'] ?? '', true);
+                if ($password === false || strlen($password) > 256 || str_contains($password, "\n") || str_contains($password, "\0")) {
+                    throw new Failure('Password SFTP non valida');
+                }
+                $pwFile = $this->secretFile($password);
+                try {
+                    $this->startJob($id, $action, $user, 'Collegamento SFTP');
+
+                    return $this->connect(['backup-remoto', 'collega', 'sftp', $dest, '--password-file', $pwFile], $r);
+                } finally {
+                    @unlink($pwFile);
+                }
+
+            case 'cartella':
+                $path = $this->field($r, 'percorso', '#^/(mnt|media|srv)(/[A-Za-z0-9._-]{1,64}){1,6}$#', 'Cartella non valida: deve stare sotto /mnt, /media o /srv (disco USB, NAS montato)');
+                if (str_contains($path, '..') || str_contains($path, '/.')) {
+                    throw new Failure('Cartella non valida');
+                }
+                $this->startJob($id, $action, $user, 'Collegamento della cartella');
+
+                return $this->connect(['backup-remoto', 'collega', 'locale', $path], $r);
+
+            case 'scollega':
+                $this->googleStop();
+                [$rc, $out] = $this->runQuiet(['backup-remoto', 'scollega']);
+                $this->expectOk($rc, 'Destinazione non scollegata', $out);
+
+                return ['messaggio' => 'Destinazione remota scollegata da questa macchina. I backup già inviati restano dove sono.'];
+
+            case 'chiave':
+                [$rc, $out] = $this->runQuiet(['backup-remoto', 'chiave']);
+                $this->expectOk($rc, 'Chiave non disponibile', $out);
+                if (!preg_match(KEY_PATTERN, $out, $m)) {
+                    throw new Failure('Chiave dei backup non trovata');
+                }
+
+                return ['messaggio' => 'Chiave dei backup.', 'dati' => ['chiave' => $m[0]]];
+
+            case 'scarica':
+                return $this->prepareDownload($id, $user, $r);
+
+            case 'ripristina':
+                $origin = $this->field($r, 'origine', '/^(locale|remoto)$/', 'Origine non valida');
+                $name = $this->backupName($r);
+                if ($origin === 'locale' && !$this->isLocalBackup($name)) {
+                    throw new Failure('Backup non presente su questa macchina');
+                }
+                $this->startJob($id, $action, $user, 'Ripristino di ' . $name);
+                $args = $origin === 'locale'
+                    ? ['ripristina', $this->backups . '/' . $name, '--si']
+                    : ['ripristina', '--remoto', $name, '--si'];
+                $this->expectOk($this->runJob($args), 'Ripristino non riuscito: EMP è rimasto com\'era (vedere il dettaglio)');
+
+                return ['messaggio' => 'Ripristino completato. Accedere di nuovo con la password valida al momento del backup.'];
+        }
+
+        throw new Failure('Azione non prevista');
+    }
+
+    // ------------------------------------------------------------------ destinazione remota
+
+    /**
+     * @param list<string> $args
+     * @param array<string, string> $r
+     * @return array{messaggio: string, dati?: array<string, mixed>}
+     */
+    private function connect(array $args, array $r): array
+    {
+        $key = $this->optionalKey($r);
+        if ($key !== null) {
+            $args[] = '--chiave';
+            $args[] = $key;
+        }
+        $output = '';
+        $rc = $this->runJob($args, $output);
+        $this->expectOk($rc, 'Collegamento non riuscito (vedere il dettaglio)');
+        if ($key !== null) {
+            return ['messaggio' => 'Destinazione collegata con la chiave indicata: i backup già presenti si possono ripristinare.'];
+        }
+        if (!preg_match(KEY_PATTERN, $output, $m)) {
+            throw new Failure('Destinazione collegata, ma la chiave dei backup non è stata letta: mostrarla con "Mostra la chiave"');
+        }
+
+        return ['messaggio' => 'Destinazione collegata. Salvare ora la chiave dei backup.', 'dati' => ['chiave' => $m[0]]];
+    }
+
+    /** @param array<string, string> $r */
+    private function optionalKey(array $r): ?string
+    {
+        $key = strtoupper(trim($r['chiave'] ?? ''));
+        if ($key === '') {
+            return null;
+        }
+        if (!preg_match('/^EMP-BK(-[A-Z2-7]{6}){5}$/', $key)) {
+            throw new Failure('Chiave dei backup non valida (formato EMP-BK-XXXXXX-…)');
+        }
+
+        return $key;
+    }
+
+    /**
+     * Google Drive, primo passo: rclone attende la risposta di Google su 127.0.0.1:53682
+     * di QUESTA macchina; al browser del Tecnico si restituisce l'indirizzo di Google.
+     *
+     * @param array<string, string> $r
+     * @return array{messaggio: string, dati: array<string, mixed>}
+     */
+    private function googleStart(array $r): array
+    {
+        $key = $this->optionalKey($r);
+        $this->googleStop();
+        if (!is_dir($this->authDir) && !@mkdir($this->authDir, 0700, true)) {
+            throw new Failure('Cartella temporanea non disponibile');
+        }
+        $out = $this->authDir . '/risposta';
+        @unlink($out);
+        // Opzioni per rclone authorize: accesso solo ai file creati da EMP.
+        // Formato di rclone: JSON in base64 senza "=" finali (RawStdEncoding).
+        $blob = rtrim(base64_encode('{"scope":"drive.file"}'), '=');
+        $cmd = ['/bin/sh', '-c', 'exec "$0" authorize drive "$1" --auth-no-open-browser --config "$2" > "$3" 2>&1',
+            $this->rclone, $blob, $this->authDir . '/vuoto.conf', $out];
+        if ($this->useSystemd) {
+            [$rc, $msg] = $this->exec(array_merge(['systemd-run', '--quiet', '--collect', '--unit=emp-gdrive-autorizza',
+                '--property=RuntimeMaxSec=900', '--setenv=HOME=/root'], $cmd));
+            if ($rc !== 0) {
+                throw new Failure('Autorizzazione di Google non avviata: ' . trim($msg));
+            }
+        } else {
+            exec(implode(' ', array_map('escapeshellarg', $cmd)) . ' > /dev/null 2>&1 &');
+        }
+
+        $local = null;
+        for ($i = 0; $i < 150 && $local === null; $i++) {
+            usleep(100000);
+            if (preg_match('#http://127\.0\.0\.1:' . AUTH_PORT . '/auth\?state=([A-Za-z0-9_-]{8,128})#', (string) @file_get_contents($out), $m)) {
+                $local = $m;
+            }
+        }
+        if ($local === null) {
+            $this->googleStop();
+            throw new Failure('rclone non ha risposto: aggiornare EMP Server o collegare Google Drive dalla console');
+        }
+        [$rc, $google] = $this->exec(['curl', '-s', '-o', '/dev/null', '--max-time', '10', '-w', '%{redirect_url}', $local[0]]);
+        $google = trim($google);
+        if ($rc !== 0 || !str_starts_with($google, 'https://accounts.google.com/')) {
+            $this->googleStop();
+            throw new Failure('Indirizzo di Google non ottenuto');
+        }
+        $this->writeJson($this->work . '/gdrive.json', ['state' => $local[1], 'chiave' => $key, 'avviato' => time()], 0600);
+
+        return ['messaggio' => 'Aprire Google e consentire l\'accesso.', 'dati' => ['url' => $google]];
+    }
+
+    /**
+     * Google Drive, secondo passo: il Tecnico incolla l'indirizzo http://127.0.0.1:53682/?…
+     * che il suo browser non riesce ad aprire; lo si consegna a rclone su questa macchina.
+     *
+     * @param array<string, string> $r
+     * @return array{messaggio: string, dati?: array<string, mixed>}
+     */
+    private function googleComplete(array $r): array
+    {
+        $pending = json_decode((string) @file_get_contents($this->work . '/gdrive.json'), true);
+        if (!is_array($pending) || !is_string($pending['state'] ?? null) || time() - (int) ($pending['avviato'] ?? 0) > 900) {
+            throw new Failure('Autorizzazione scaduta o non avviata: ripartire da "Collega Google Drive"');
+        }
+        $url = trim($r['indirizzo'] ?? '');
+        $parts = parse_url($url);
+        $query = [];
+        parse_str((string) ($parts['query'] ?? ''), $query);
+        if (!is_array($parts) || !in_array($parts['host'] ?? '', ['127.0.0.1', 'localhost'], true) || (int) ($parts['port'] ?? 0) !== AUTH_PORT) {
+            throw new Failure('Incollare l\'indirizzo completo che inizia con http://127.0.0.1:' . AUTH_PORT . '/');
+        }
+        if (isset($query['error']) && is_string($query['error'])) {
+            throw new Failure('Google ha rifiutato l\'accesso: ' . preg_replace('/[^A-Za-z0-9_ -]/', '', $query['error']));
+        }
+        $state = is_string($query['state'] ?? null) ? $query['state'] : '';
+        $code = is_string($query['code'] ?? null) ? $query['code'] : '';
+        $scope = is_string($query['scope'] ?? null) ? $query['scope'] : '';
+        if (!hash_equals($pending['state'], $state)) {
+            throw new Failure('L\'indirizzo non corrisponde all\'ultima autorizzazione: ripartire da "Collega Google Drive"');
+        }
+        if (!preg_match('#^[A-Za-z0-9/._~-]{10,1024}$#', $code) || !preg_match('#^[A-Za-z0-9:/._ +-]{0,1024}$#', $scope)) {
+            throw new Failure('Codice di Google non valido');
+        }
+        $this->jobLine('Consegna del codice di Google a rclone');
+        $callback = 'http://127.0.0.1:' . AUTH_PORT . '/?' . http_build_query(['state' => $state, 'code' => $code, 'scope' => $scope], '', '&', PHP_QUERY_RFC3986);
+        $this->exec(['curl', '-s', '-o', '/dev/null', '--max-time', '30', $callback]);
+
+        $token = null;
+        for ($i = 0; $i < 300 && $token === null; $i++) {
+            $text = (string) @file_get_contents($this->authDir . '/risposta');
+            if (preg_match('/--->\s*(\S+)\s*<---End paste/', $text, $m)) {
+                $token = $m[1];
+            }
+            usleep(100000);
+        }
+        $this->googleStop();
+        @unlink($this->work . '/gdrive.json');
+        $decoded = $token !== null ? self::authorizeToken($token) : null;
+        if ($decoded === null) {
+            throw new Failure('Google non ha concesso l\'accesso (codice già usato o scaduto): ripartire da "Collega Google Drive"');
+        }
+        $tokenFile = $this->secretFile((string) json_encode($decoded, JSON_UNESCAPED_SLASHES));
+        try {
+            $args = ['backup-remoto', 'collega', 'gdrive', '--token-file', $tokenFile];
+
+            return $this->connect($args, ['chiave' => (string) ($pending['chiave'] ?? '')]);
+        } finally {
+            @unlink($tokenFile);
+        }
+    }
+
+    /**
+     * Token dall'uscita di "rclone authorize": JSON del token oppure, quando si passano le
+     * opzioni in base64, la configurazione in base64 con il token JSON nel campo "token".
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function authorizeToken(string $out): ?array
+    {
+        if (!str_starts_with($out, '{')) {
+            $raw = base64_decode(strtr($out, '-_', '+/') . str_repeat('=', (4 - strlen($out) % 4) % 4), true);
+            $config = $raw !== false ? json_decode($raw, true) : null;
+            $out = is_array($config) && is_string($config['token'] ?? null) ? $config['token'] : '';
+        }
+        $token = json_decode($out, true);
+
+        return is_array($token) && is_string($token['access_token'] ?? null) && $token['access_token'] !== '' ? $token : null;
+    }
+
+    private function googleStop(): void
+    {
+        if ($this->useSystemd) {
+            $this->exec(['systemctl', 'stop', 'emp-gdrive-autorizza.service']);
+        } else {
+            $this->exec(['pkill', '-f', 'authorize drive']);
+        }
+        @unlink($this->authDir . '/risposta');
+    }
+
+    // ------------------------------------------------------------------ download
+
+    /**
+     * @param array<string, string> $r
+     * @return array{messaggio: string, dati: array<string, mixed>}
+     */
+    private function prepareDownload(string $id, string $user, array $r): array
+    {
+        $origin = $this->field($r, 'origine', '/^(locale|remoto)$/', 'Origine non valida');
+        $name = $this->backupName($r);
+        if (!is_dir($this->downloads)) {
+            throw new Failure('Cartella dei download assente: rieseguire installa.sh');
+        }
+        if ($origin === 'remoto' && !$this->isLocalBackup($name)) {
+            $this->startJob($id, 'scarica', $user, 'Download di ' . $name . ' dalla destinazione remota');
+            $this->expectOk($this->runJob(['backup-scarica', '--remoto', $name]), 'Download dalla destinazione remota non riuscito');
+        }
+        if (!$this->isLocalBackup($name)) {
+            throw new Failure('Backup non presente su questa macchina');
+        }
+        $source = $this->backups . '/' . $name;
+        $size = (int) filesize($source);
+        $free = @disk_free_space($this->downloads);
+        if ($free !== false && $free < $size * 1.1 + 50 * 1048576) {
+            throw new Failure('Spazio su disco insufficiente per preparare il download');
+        }
+        $token = bin2hex(random_bytes(16));
+        $dest = $this->downloads . '/' . $token . '.tar';
+        $tmp = $dest . '.parziale';
+        if (!@copy($source, $tmp)) {
+            @unlink($tmp);
+            throw new Failure('Copia del backup non riuscita');
+        }
+        chmod($tmp, 0640);
+        if (function_exists('posix_getgrnam') && posix_getgrnam('www-data') !== false) {
+            @chgrp($tmp, 'www-data');
+        }
+        rename($tmp, $dest);
+        $list = $this->downloadList();
+        $list[] = ['token' => $token, 'nome' => $name, 'byte' => $size, 'utente' => $user, 'scade' => time() + DOWNLOAD_TTL];
+        $this->writeJson($this->web . '/scaricamenti.json', $list, 0640, true);
+
+        return ['messaggio' => 'Download pronto (disponibile per un\'ora).', 'dati' => ['token' => $token, 'nome' => $name, 'byte' => $size]];
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function downloadList(): array
+    {
+        $list = json_decode((string) @file_get_contents($this->web . '/scaricamenti.json'), true);
+        if (!is_array($list)) {
+            return [];
+        }
+
+        return array_values(array_filter($list, static fn ($d): bool => is_array($d) && (int) ($d['scade'] ?? 0) > time()));
+    }
+
+    private function cleanDownloads(): void
+    {
+        $list = $this->downloadList();
+        $valid = array_column($list, 'token');
+        if (is_dir($this->downloads)) {
+            foreach (scandir($this->downloads) ?: [] as $f) {
+                if ($f === '.' || $f === '..') {
+                    continue;
+                }
+                $path = $this->downloads . '/' . $f;
+                $keep = preg_match('/^([0-9a-f]{32})\.tar$/', $f, $m) && in_array($m[1], $valid, true);
+                if (!$keep && (is_link($path) || is_file($path))) {
+                    @unlink($path);
+                }
+            }
+        }
+        if (is_file($this->web . '/scaricamenti.json')) {
+            $this->writeJson($this->web . '/scaricamenti.json', $list, 0640, true);
+        }
+        // Esiti mai letti dalla pagina (es. pagina chiusa): via dopo un'ora.
+        foreach (scandir($this->responses) ?: [] as $f) {
+            $path = $this->responses . '/' . $f;
+            if ($f !== '.' && $f !== '..' && !is_dir($path) && (int) @filemtime($path) < time() - DOWNLOAD_TTL) {
+                @unlink($path);
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ stato
+
+    private function writeState(): void
+    {
+        $settings = ['ora' => '02:30', 'notturno' => true, 'conserva_locali' => 14, 'conserva_remoti' => 30, 'prossimo' => null];
+        [$rc, $out] = $this->runQuiet(['backup-impostazioni', '--tsv']);
+        if ($rc === 0) {
+            foreach (explode("\n", $out) as $line) {
+                $f = explode("\t", $line);
+                if (count($f) !== 2) {
+                    continue;
+                }
+                match ($f[0]) {
+                    'ora' => $settings['ora'] = $f[1],
+                    'notturno' => $settings['notturno'] = $f[1] === 'si',
+                    'conserva_locali' => $settings['conserva_locali'] = (int) $f[1],
+                    'conserva_remoti' => $settings['conserva_remoti'] = (int) $f[1],
+                    'prossimo' => $settings['prossimo'] = ctype_digit($f[1]) ? date(DATE_ATOM, (int) $f[1]) : null,
+                    default => null,
+                };
+            }
+        }
+
+        $local = [];
+        $remote = [];
+        $destination = ['collegata' => false, 'descrizione' => null, 'raggiungibile' => null];
+        [$rc, $out] = $this->runQuiet(['backup-elenco', '--tsv']);
+        foreach ($rc === 0 ? explode("\n", $out) : [] as $line) {
+            $f = explode("\t", $line);
+            if ($f[0] === 'locale' && count($f) === 4 && preg_match(NAME_PATTERN, $f[1])) {
+                $local[] = ['nome' => $f[1], 'byte' => (int) $f[2], 'data' => date(DATE_ATOM, (int) $f[3])];
+            } elseif ($f[0] === 'remoto' && count($f) === 4 && preg_match(NAME_PATTERN, $f[1])) {
+                $remote[] = ['nome' => $f[1], 'byte' => (int) $f[2], 'data' => (int) $f[3] > 0 ? date(DATE_ATOM, (int) $f[3]) : null];
+            } elseif ($f[0] === 'destinazione' && count($f) === 3) {
+                $destination = ['collegata' => true, 'descrizione' => mb_substr($f[1], 0, 200), 'raggiungibile' => $f[2] === '1'];
+            }
+        }
+        $this->writeJson($this->web . '/stato.json', [
+            'formato' => VERSION_FORMAT,
+            'aggiornato' => date(DATE_ATOM),
+            'disponibile' => $rc === 0,
+            'impostazioni' => $settings,
+            'destinazione' => $destination,
+            'locali' => $local,
+            'remoti' => $remote,
+        ], 0640, true);
+    }
+
+    // ------------------------------------------------------------------ operazione in corso
+
+    private function startJob(string $id, string $action, string $user, string $title): void
+    {
+        $this->job = ['id' => $id, 'azione' => $action, 'titolo' => $title, 'utente' => $user,
+            'iniziato' => date(DATE_ATOM), 'finito' => null, 'esito' => null, 'righe' => []];
+        $this->writeJob(true);
+    }
+
+    private function jobLine(string $line): void
+    {
+        if ($this->job === null) {
+            return;
+        }
+        // Mai una chiave dei backup nel registro visibile dalla pagina.
+        $line = preg_replace(KEY_PATTERN, 'EMP-BK-•••', rtrim($line));
+        $this->job['righe'][] = mb_substr((string) $line, 0, 400);
+        $this->job['righe'] = array_slice($this->job['righe'], -300);
+        $this->writeJob(false);
+    }
+
+    private function finishJob(): void
+    {
+        if ($this->job !== null) {
+            $this->job['finito'] = date(DATE_ATOM);
+            $this->writeJob(true);
+            $this->job = null;
+        }
+    }
+
+    private function writeJob(bool $force): void
+    {
+        if (!$force && microtime(true) - $this->jobWritten < 0.5) {
+            return;
+        }
+        $this->jobWritten = microtime(true);
+        $this->writeJson($this->web . '/lavoro.json', $this->job, 0640, true);
+    }
+
+    // ------------------------------------------------------------------ comandi
+
+    /**
+     * emp-server con l'uscita nel registro dell'operazione in corso.
+     *
+     * @param list<string> $args
+     */
+    private function runJob(array $args, string &$output = ''): int
+    {
+        $p = proc_open(array_merge([$this->empServer], $args), [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes, null, $this->env());
+        if (!is_resource($p)) {
+            throw new Failure('emp-server non avviato');
+        }
+        while (($line = fgets($pipes[1])) !== false) {
+            $output .= $line;
+            $this->jobLine($line);
+        }
+        fclose($pipes[1]);
+        $rc = proc_close($p);
+        if ($this->job !== null) {
+            $this->job['esito'] = $rc;
+        }
+
+        return $rc;
+    }
+
+    /**
+     * emp-server senza registro (uscita restituita, es. la chiave).
+     *
+     * @param list<string> $args
+     * @return array{0: int, 1: string}
+     */
+    private function runQuiet(array $args): array
+    {
+        return $this->exec(array_merge([$this->empServer], $args));
+    }
+
+    /**
+     * @param list<string> $cmd
+     * @return array{0: int, 1: string}
+     */
+    private function exec(array $cmd): array
+    {
+        $p = @proc_open($cmd, [0 => ['file', '/dev/null', 'r'], 1 => ['pipe', 'w'], 2 => ['redirect', 1]], $pipes, null, $this->env());
+        if (!is_resource($p)) {
+            return [127, ''];
+        }
+        $out = (string) stream_get_contents($pipes[1]);
+        fclose($pipes[1]);
+
+        return [proc_close($p), $out];
+    }
+
+    /** @return array<string, string> */
+    private function env(): array
+    {
+        return ['PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'LANG' => 'C.UTF-8', 'HOME' => '/root'];
+    }
+
+    private function expectOk(int $rc, string $message, string $output = ''): void
+    {
+        if ($rc === 0) {
+            return;
+        }
+        if (preg_match('/^ERRORE: (.+)$/m', $output, $m)) {
+            $message .= ': ' . preg_replace(KEY_PATTERN, 'EMP-BK-•••', $m[1]);
+        }
+        throw new Failure($message);
+    }
+
+    // ------------------------------------------------------------------ valori
+
+    /** @param array<string, string> $r */
+    private function field(array $r, string $key, string $pattern, string $error): string
+    {
+        $v = $r[$key] ?? '';
+        if (!preg_match($pattern, $v)) {
+            throw new Failure($error);
+        }
+
+        return $v;
+    }
+
+    /** @param array<string, string> $r */
+    private function number(array $r, string $key, int $max, string $error): string
+    {
+        $v = $r[$key] ?? '';
+        if (!preg_match('/^[1-9][0-9]{0,2}$/', $v) || (int) $v > $max) {
+            throw new Failure($error);
+        }
+
+        return $v;
+    }
+
+    /** @param array<string, string> $r */
+    private function backupName(array $r): string
+    {
+        $name = $this->field($r, 'nome', NAME_PATTERN, 'Nome del backup non valido');
+        if (str_contains($name, '..')) {
+            throw new Failure('Nome del backup non valido');
+        }
+
+        return $name;
+    }
+
+    private function isLocalBackup(string $name): bool
+    {
+        $path = $this->backups . '/' . $name;
+
+        return !is_link($path) && is_file($path);
+    }
+
+    // ------------------------------------------------------------------ file
+
+    private function secretFile(string $content): string
+    {
+        $file = tempnam($this->work, '.segreto-');
+        if ($file === false) {
+            throw new Failure('File temporaneo non disponibile');
+        }
+        chmod($file, 0600);
+        file_put_contents($file, $content);
+
+        return $file;
+    }
+
+    /**
+     * Risposta per il Core in risposte/ (cartella dell'utente emp): file temporaneo con nome
+     * casuale (mai seguito un collegamento), poi rinominato. Proprietario emp, che la cancella.
+     *
+     * @param array<string, mixed> $data
+     */
+    private function respond(string $id, string $user, string $action, bool $ok, string $message, array $data = []): void
+    {
+        if (!preg_match(ID_PATTERN, $id)) {
+            return;
+        }
+        $json = json_encode(['id' => $id, 'utente' => $user, 'azione' => $action, 'ok' => $ok,
+            'messaggio' => $message, 'dati' => $data, 'finito' => date(DATE_ATOM)], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $tmp = tempnam($this->responses, '.r-');
+        if ($tmp === false || $json === false) {
+            return;
+        }
+        file_put_contents($tmp, $json);
+        chmod($tmp, 0600);
+        $owner = @fileowner($this->responses);
+        if ($owner !== false) {
+            @chown($tmp, $owner);
+        }
+        if (!@rename($tmp, $this->responses . '/' . $id . '.json')) {
+            @unlink($tmp);
+        }
+    }
+
+    /** File nella cartella di root backup-web, leggibile dal gruppo emp ($shared). */
+    private function writeJson(string $path, mixed $data, int $mode, bool $shared = false): void
+    {
+        $tmp = tempnam(dirname($path), '.j-');
+        if ($tmp === false) {
+            return;
+        }
+        file_put_contents($tmp, json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT));
+        chmod($tmp, $mode);
+        if ($shared) {
+            $group = @filegroup(dirname($path));
+            if ($group !== false) {
+                @chgrp($tmp, $group);
+            }
+        }
+        rename($tmp, $path);
+    }
+}
+
+final class Failure extends \RuntimeException
+{
+}
+
+exit((new Worker())->main($argv));

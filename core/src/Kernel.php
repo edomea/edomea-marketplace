@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Emp\Core;
 
 use Emp\Core\Access\AccessService;
+use Emp\Core\Backup\BackupBridge;
 use Emp\Core\Http\CsrfGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
@@ -49,6 +50,8 @@ final class Kernel
         public readonly ?string $serverVersion = null,
         /** Cartella di arrivo dei plugin caricati via scp (null: funzione non disponibile). */
         private readonly ?string $arrivalsDir = null,
+        /** Cartella di scambio con il servizio dei backup di EMP Server (null fuori da EMP Server). */
+        private readonly ?string $backupWebDir = null,
     ) {
         $this->router = new Router();
         $this->autoloader = new Psr4Autoloader();
@@ -136,6 +139,12 @@ final class Kernel
     public function arrivals(): ?Arrivals
     {
         return $this->arrivalsDir !== null ? new Arrivals($this->arrivalsDir) : null;
+    }
+
+    /** Pagina Backup: richieste al servizio dei backup di EMP Server (null se non configurato). */
+    public function backup(): ?BackupBridge
+    {
+        return $this->backupWebDir !== null ? new BackupBridge($this->backupWebDir) : null;
     }
 
     /** Registro di tracciabilità del Core. */

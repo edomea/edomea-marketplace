@@ -8,6 +8,7 @@ use Emp\Core\Access\AccessException;
 use Emp\Core\Access\AccessService;
 use Emp\Core\Access\Role;
 use Emp\Core\Access\User;
+use Emp\Core\Backup\BackupRoutes;
 use Emp\Core\Http\AdminGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
@@ -56,6 +57,9 @@ use Emp\Core\Plugin\PackageException;
  *   POST /api/v1/plugin/github                 {attiva, repository}
  *   GET  /api/v1/plugin/github/release         release pubblicate del repository
  *   POST /api/v1/plugin/github/importa         {tag}: plugin della release → catalogo locale
+ *
+ * Backup (solo Tecnico, solo HTTPS; eseguiti da EMP Server): vedi Backup\BackupRoutes
+ *   GET  /api/v1/backup  ·  POST /api/v1/backup/{esegui,impostazioni,destinazione,chiave,scarica,ripristina,…}
  */
 final class CoreModule implements ModuleInterface
 {
@@ -310,6 +314,9 @@ final class CoreModule implements ModuleInterface
 
             return Response::json(['ok' => true, 'pacchetti' => $imported, 'operazioni' => $log]);
         }));
+
+        // ---- Backup di EMP (pagina Backup di /techadmin) --------------------------------
+        BackupRoutes::register($kernel, $id);
     }
 
     /** Copia il corpo della richiesta in un file, con un limite reale sui byte. */

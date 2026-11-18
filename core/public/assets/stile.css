@@ -54,3 +54,14 @@ form.riga label.spunta input { display: inline; width: auto; margin-right: 6px; 
 .avviso { border-left: 4px solid var(--emp-errore); background: #fbeceb; padding: 10px 12px; }
 .conferma-custodia { display: block; margin: 12px 0; font-weight: 600; }
 .conferma-custodia input { display: inline; width: auto; margin-right: 8px; }
+.registro { background: #0f2233; color: #dbe7ea; font: 13px ui-monospace, monospace; padding: 10px 12px; border-radius: 6px; max-height: 260px; overflow: auto; white-space: pre-wrap; margin: 6px 0 0; }
+table.dettagli { border: 0; }
+table.dettagli th { width: 260px; font-weight: 600; color: var(--emp-tenue); }
+.riga-azioni { display: flex; gap: 8px; flex-wrap: wrap; }
+form.conferma-password { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+form.conferma-password strong { flex-basis: 100%; }
+form.conferma-password input { display: inline-block; width: auto; min-width: 200px; margin: 0; padding: 6px 8px; border: 1px solid #afc4ca; border-radius: 6px; font: inherit; }
+fieldset.scelta { border: 0; padding: 0; margin: 6px 0; display: flex; gap: 18px; flex-wrap: wrap; }
+fieldset.scelta label.spunta { display: inline-flex; align-items: center; margin: 0; }
+fieldset.scelta label.spunta input { width: auto; margin: 0 6px 0 0; }
+section.box h4 { margin: 14px 0 6px; }

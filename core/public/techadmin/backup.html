@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
+<title>Backup — EMP</title>
+<link rel="stylesheet" href="/assets/stile.css">
+<script defer src="/assets/comune.js"></script>
+<script defer src="backup.js"></script>
+</head>
+<body>
+<header class="emp-header">
+  <strong>EMP — Backup</strong>
+  <span id="user-badge"></span>
+</header>
+<main>
+  <p><a href="index.html">← Amministratore Tecnico</a></p>
+  <p class="intro">
+    Il backup contiene <strong>tutto EMP e solo EMP</strong>: database, Core, plugin, cataloghi e il pacchetto della versione
+    di EMP Server in uso. Non contiene ciò che appartiene alla macchina (nome, certificato HTTPS, collegamento a GitHub e a questa
+    destinazione remota). Prima di ogni aggiornamento di EMP Server il backup si fa da solo.
+  </p>
+  <p class="note">Funzione riservata all'Amministratore Tecnico, disponibile solo con l'indirizzo https://.</p>
+
+  <div id="non-disponibile" class="box err" hidden></div>
+
+  <div id="contenuto" hidden>
+    <!-- Stato e backup immediato -->
+    <section class="box">
+      <h3>Stato</h3>
+      <table class="dettagli">
+        <tbody>
+          <tr><th>Ultimo backup</th><td id="ultimo">—</td></tr>
+          <tr><th>Prossimo backup automatico</th><td id="prossimo">—</td></tr>
+          <tr><th>Copia remota cifrata</th><td id="remota">—</td></tr>
+          <tr><th>Dati aggiornati</th><td id="aggiornato">—</td></tr>
+        </tbody>
+      </table>
+      <p>
+        <button type="button" id="esegui">Esegui un backup adesso</button>
+        <button type="button" id="aggiorna" class="secondario">Aggiorna</button>
+      </p>
+      <div id="lavoro" hidden>
+        <p><strong id="lavoro-titolo"></strong> <span id="lavoro-stato" class="stato"></span></p>
+        <pre id="lavoro-righe" class="registro"></pre>
+      </div>
+    </section>
+
+    <!-- Pianificazione e conservazione -->
+    <section class="box">
+      <h3>Pianificazione e conservazione</h3>
+      <form id="impostazioni" class="riga" novalidate>
+        <label class="spunta"><input type="checkbox" id="notturno"> Backup automatico ogni notte</label>
+        <label>Orario <input type="time" id="ora" required></label>
+        <label>Backup da conservare su questa macchina <input type="number" id="conserva-locali" min="1" max="90" required></label>
+        <label>Backup da conservare sulla destinazione remota <input type="number" id="conserva-remoti" min="1" max="365" required></label>
+        <button type="submit">Salva</button>
+      </form>
+      <p class="note">I backup più vecchi oltre questi numeri vengono cancellati a ogni nuovo backup. Sulla destinazione remota
+        si contano solo quelli di questo server.</p>
+    </section>
+
+    <!-- Destinazione remota -->
+    <section class="box">
+      <h3>Copia remota cifrata</h3>
+      <p class="note">Ogni backup viene copiato anche sulla destinazione remota, cifrato con la <strong>chiave dei backup</strong>.
+        Senza la chiave i backup remoti non si possono aprire: va conservata fuori da questa macchina.</p>
+      <p id="dest-attuale"></p>
+      <div id="dest-azioni" class="riga-azioni" hidden>
+        <button type="button" id="mostra-chiave" class="secondario">Mostra la chiave dei backup</button>
+        <button type="button" id="cambia-dest" class="secondario">Cambia destinazione</button>
+        <button type="button" id="scollega" class="secondario">Scollega</button>
+      </div>
+      <div id="conferma-box" class="box" hidden></div>
+      <div id="chiave-box" class="box" hidden></div>
+
+      <form id="collega" novalidate hidden>
+        <h4>Collega una destinazione</h4>
+        <fieldset class="scelta">
+          <label class="spunta"><input type="radio" name="tipo" value="gdrive" checked> Google Drive</label>
+          <label class="spunta"><input type="radio" name="tipo" value="sftp"> Server SFTP</label>
+          <label class="spunta"><input type="radio" name="tipo" value="cartella"> Cartella (disco USB o NAS montato)</label>
+        </fieldset>
+        <p class="note" data-tipo="gdrive">EMP vede solo i file che crea lui, nella cartella <code>EMP-backup</code> del Drive.
+          Dopo "Collega" si apre Google: accedere con l'account dei backup e consentire l'accesso.</p>
+        <label data-tipo="sftp" hidden>Server <input name="destinazione" autocomplete="off" placeholder="utente@server oppure utente@server:porta"></label>
+        <label data-tipo="sftp" hidden>Password SFTP <input name="password_sftp" type="password" autocomplete="off">
+          <span class="note">Vuota per usare la chiave SSH di root del Server.</span></label>
+        <label data-tipo="cartella" hidden>Cartella <input name="percorso" autocomplete="off" placeholder="/mnt/disco-backup">
+          <span class="note">Sotto /mnt, /media o /srv, già montata sul Server.</span></label>
+        <label>Chiave dei backup esistente (facoltativa)
+          <input name="chiave" autocomplete="off" placeholder="EMP-BK-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX">
+          <span class="note">Solo per ritrovare i backup di un server precedente (nuova installazione). Vuota: viene creata una chiave nuova.</span></label>
+        <label>La tua password <input name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit">Collega</button>
+        <button type="button" id="annulla-collega" class="secondario" hidden>Annulla</button>
+      </form>
+
+      <div id="google-box" class="box" hidden>
+        <h4>Collegamento a Google Drive</h4>
+        <ol>
+          <li><a id="google-link" href="#" target="_blank" rel="noopener noreferrer">Apri Google in una nuova scheda</a>,
+            accedi con l'account Google dei backup e consenti l'accesso.</li>
+          <li>Alla fine il browser mostra una pagina che <strong>non si apre</strong> (indirizzo che inizia con
+            <code>http://127.0.0.1:53682/</code>): è normale. Copia l'indirizzo completo dalla barra in alto.</li>
+          <li>Incollalo qui e conferma (entro 15 minuti).</li>
+        </ol>
+        <form id="google" class="riga" novalidate>
+          <label>Indirizzo copiato <input name="indirizzo" autocomplete="off" placeholder="http://127.0.0.1:53682/?state=…&amp;code=…" required></label>
+          <button type="submit">Conferma</button>
+          <button type="button" id="google-annulla" class="secondario">Annulla</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Elenco dei backup -->
+    <section class="box">
+      <h3>Backup su questa macchina</h3>
+      <table id="locali">
+        <thead><tr><th>Backup</th><th>Data</th><th>Dimensione</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <h3 id="remoti-titolo">Backup sulla destinazione remota</h3>
+      <table id="remoti">
+        <thead><tr><th>Backup</th><th>Data</th><th>Dimensione</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <p class="note">Il file scaricato non è cifrato: contiene tutti i dati di EMP. Conservarlo con cura.
+        Il <strong>ripristino</strong> sostituisce database, Core, plugin e cataloghi con quelli del backup (prima salva lo stato attuale);
+        dopo il ripristino si accede con la password valida al momento del backup.</p>
+    </section>
+  </div>
+</main>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

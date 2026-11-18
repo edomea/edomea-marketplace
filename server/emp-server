@@ -9,6 +9,8 @@
 #   sudo emp-server backup                         backup completo di EMP (database, Core, plugin, versione)
 #   sudo emp-server backup-elenco                  backup su questa macchina e sulla destinazione remota
 #   sudo emp-server backup-remoto collega gdrive   copia cifrata di ogni backup su Google Drive (anche sftp)
+#   sudo emp-server backup-impostazioni [--ora HH:MM] [--notturno si|no] [--conserva N] [--conserva-remoti N]
+#   sudo emp-server backup-scarica --remoto NOME   copia un backup remoto (decifrato) su questa macchina
 #   sudo emp-server ripristina FILE|--remoto NOME  rimette EMP com'era nel backup (stessa o nuova macchina)
 #   sudo emp-server accesso-scp NOME [--togli]     backup scaricabili e plugin caricabili via scp per NOME
 #   sudo emp-server elimina-vecchio-utente         elimina l'account personale "emp" (EMP usa un utente di sistema)
@@ -30,7 +32,12 @@ readonly EMP_LOGS=/var/log/emp
 readonly EMP_USER=emp
 readonly EMP_HOME=/opt/emp/server
 readonly RUNNER_DIR=${EMP_RUNNER_DIR:-/opt/actions-runner}   # EMP_RUNNER_DIR: solo per i test
-readonly BACKUP_KEEP=14
+# Impostazioni dei backup: valori predefiniti, modificabili dalla pagina Backup di /techadmin
+# o con "emp-server backup-impostazioni" (file /etc/emp/backup.conf, della macchina).
+BACKUP_KEEP=14
+REMOTE_KEEP=30
+BACKUP_TIME=02:30
+BACKUP_NIGHTLY=si
 readonly CERT_DAYS=825
 readonly CERT_RENEW_SECONDS=$((60 * 24 * 3600))
 
@@ -82,6 +89,14 @@ create_dirs() {
     install -d -m 2770 -o "$EMP_USER" -g "$EMP_SCP_GROUP" "$EMP_ARRIVALS"
     install -d -m 0750 -o "$EMP_USER" -g adm "$EMP_LOGS"
     install -d -m 0755 -o root -g root "$EMP_CONF_DIR"
+    # Pagina Backup di /techadmin: il Core (utente emp) deposita le richieste, il servizio
+    # emp-backup-web (root) le esegue e scrive lo stato; i file da scaricare li serve Nginx.
+    install -d -m 0750 -o root -g "$EMP_USER" "$EMP_DATA/backup-web"
+    install -d -m 0700 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/backup-web/preparazione" "$EMP_DATA/backup-web/richieste" "$EMP_DATA/backup-web/risposte"
+    install -d -m 0700 -o root -g root "$EMP_DATA/backup-web/lavorazione"
+    if getent group www-data >/dev/null; then
+        install -d -m 0750 -o root -g www-data "$EMP_DATA/scaricamenti"
+    fi
 }
 
 extra_dns() {
@@ -343,7 +358,6 @@ readonly BACKUP_FORMAT=1
 readonly EMP_PACKAGE_DIR=$EMP_DATA/pacchetto
 readonly REMOTE_DIR=$EMP_CONF_DIR/backup-remoto
 readonly REMOTE_CONF=$REMOTE_DIR/rclone.conf
-readonly REMOTE_KEEP=30
 readonly EMP_DATA_DIRS="moduli catalogo catalogo-locale"
 
 # Cartelle temporanee rimosse all'uscita (niente trap RETURN: in Bash sono globali e si
@@ -373,8 +387,97 @@ emp_database_exists() { [[ -n $(mariadb -N -e "SHOW DATABASES LIKE 'emp'" 2>/dev
 rclone_emp() { rclone --config "$REMOTE_CONF" "$@"; }
 remote_configured() { [[ -f $REMOTE_CONF ]] && command -v rclone >/dev/null; }
 
+# ---------------------------------------------------------------- impostazioni dei backup
+#
+# /etc/emp/backup.conf (della macchina, non va nei backup): righe CHIAVE=valore, lette senza
+# eseguirle. L'orario del backup notturno è applicato al timer con un file aggiuntivo di systemd.
+
+readonly BACKUP_CONF=$EMP_CONF_DIR/backup.conf
+readonly BACKUP_TIMER_DROPIN_DIR=/etc/systemd/system/emp-backup.timer.d
+readonly BACKUP_TIMER_DROPIN=$BACKUP_TIMER_DROPIN_DIR/emp-impostazioni.conf
+
+valid_backup_time() { [[ $1 =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]]; }
+valid_keep() { [[ $1 =~ ^[1-9][0-9]{0,2}$ ]] && (($1 <= $2)); }
+
+load_backup_settings() {
+    [[ -f $BACKUP_CONF ]] || return 0
+    local key value
+    while IFS='=' read -r key value; do
+        case $key in
+            ORA) valid_backup_time "$value" && BACKUP_TIME=$value ;;
+            NOTTURNO) [[ $value == si || $value == no ]] && BACKUP_NIGHTLY=$value ;;
+            CONSERVA_LOCALI) valid_keep "$value" 90 && BACKUP_KEEP=$value ;;
+            CONSERVA_REMOTI) valid_keep "$value" 365 && REMOTE_KEEP=$value ;;
+        esac
+    done < "$BACKUP_CONF"
+    return 0
+}
+
+save_backup_settings() {
+    local tmp
+    tmp=$(mktemp "$EMP_CONF_DIR/.backup-XXXXXX")
+    {
+        echo "# EMP Server — impostazioni dei backup (pagina Backup di /techadmin o emp-server backup-impostazioni)"
+        echo "ORA=$BACKUP_TIME"
+        echo "NOTTURNO=$BACKUP_NIGHTLY"
+        echo "CONSERVA_LOCALI=$BACKUP_KEEP"
+        echo "CONSERVA_REMOTI=$REMOTE_KEEP"
+    } > "$tmp"
+    chmod 0644 "$tmp"
+    mv "$tmp" "$BACKUP_CONF"
+}
+
+# Orario e attivazione del backup notturno (usata anche da installa.sh e dal ripristino).
+apply_backup_timer() {
+    load_backup_settings
+    command -v systemctl >/dev/null || return 0
+    install -d -m 0755 "$BACKUP_TIMER_DROPIN_DIR"
+    printf '# Generato da emp-server backup-impostazioni\n[Timer]\nOnCalendar=\nOnCalendar=*-*-* %s:00\n' "$BACKUP_TIME" > "$BACKUP_TIMER_DROPIN"
+    systemctl daemon-reload 2>/dev/null || true
+    if [[ $BACKUP_NIGHTLY == si ]]; then
+        systemctl enable -q emp-backup.timer 2>/dev/null || true
+        systemctl restart emp-backup.timer 2>/dev/null || true
+    else
+        systemctl disable -q --now emp-backup.timer 2>/dev/null || true
+    fi
+}
+
+next_backup_epoch() {
+    [[ $BACKUP_NIGHTLY == si ]] || return 0
+    systemctl show emp-backup.timer -p NextElapseUSecRealtime --value --timestamp=unix 2>/dev/null | tr -d '@' | grep -E '^[0-9]+$' || true
+}
+
+cmd_backup_impostazioni() {
+    require_root backup-impostazioni
+    load_backup_settings
+    local tsv=0 changed=0
+    while (($#)); do
+        case $1 in
+            --ora) valid_backup_time "${2:-}" || die "orario non valido (HH:MM, es. 02:30)"; BACKUP_TIME=$2; changed=1; shift 2 ;;
+            --notturno) [[ $# -ge 2 && ( $2 == si || $2 == no ) ]] || die "uso: --notturno si|no"; BACKUP_NIGHTLY=$2; changed=1; shift 2 ;;
+            --conserva) valid_keep "${2:-}" 90 || die "backup locali da conservare: da 1 a 90"; BACKUP_KEEP=$2; changed=1; shift 2 ;;
+            --conserva-remoti) valid_keep "${2:-}" 365 || die "backup remoti da conservare: da 1 a 365"; REMOTE_KEEP=$2; changed=1; shift 2 ;;
+            --tsv) tsv=1; shift ;;
+            *) die "opzione sconosciuta: $1" ;;
+        esac
+    done
+    if ((changed)); then
+        save_backup_settings
+        apply_backup_timer
+        info "Impostazioni dei backup salvate"
+    fi
+    if ((tsv)); then
+        printf 'ora\t%s\nnotturno\t%s\nconserva_locali\t%s\nconserva_remoti\t%s\nprossimo\t%s\n' \
+            "$BACKUP_TIME" "$BACKUP_NIGHTLY" "$BACKUP_KEEP" "$REMOTE_KEEP" "$(next_backup_epoch)"
+    else
+        echo "Backup notturno: $([[ $BACKUP_NIGHTLY == si ]] && echo "attivo, ogni notte alle $BACKUP_TIME" || echo disattivato)"
+        echo "Backup conservati: ultimi $BACKUP_KEEP su questa macchina, ultimi $REMOTE_KEEP sulla destinazione remota"
+    fi
+}
+
 cmd_backup() {
     require_root backup
+    load_backup_settings
     local label='' upload=1
     while (($#)); do
         case $1 in
@@ -446,6 +549,25 @@ cmd_backup() {
 
 cmd_backup_elenco() {
     require_root backup-elenco
+    if [[ ${1:-} == --tsv ]]; then
+        # Per la pagina Backup: origine, nome, byte, data (secondi dal 1970), dal più recente.
+        find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf 'locale\t%f\t%s\t%T@\n' 2>/dev/null | sort -t$'\t' -k4,4nr
+        if remote_configured; then
+            local list
+            if list=$(rclone_emp lsjson emp-cifrato: --files-only 2>/dev/null); then
+                printf 'destinazione\t%s\t1\n' "$(remote_description)"
+                # shellcheck disable=SC2016  # codice PHP, non variabili della shell
+                php -r 'foreach (json_decode(stream_get_contents(STDIN), true) ?: [] as $f) {
+                        if (is_array($f) && preg_match("/^emp-backup-[a-z0-9.-]+\\.tar\$/", (string) ($f["Path"] ?? ""))) {
+                            printf("remoto\t%s\t%d\t%d\n", $f["Path"], (int) ($f["Size"] ?? 0), (int) strtotime((string) ($f["ModTime"] ?? "")));
+                        }
+                    }' <<<"$list" | sort -t$'\t' -k4,4nr
+            else
+                printf 'destinazione\t%s\t0\n' "$(remote_description)"
+            fi
+        fi
+        return 0
+    fi
     echo "Backup su questa macchina ($EMP_BACKUP):"
     find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf '%TY-%Tm-%Td %TH:%TM  %10s  %f\n' 2>/dev/null | sort -r | sed 's/^/  /'
     if remote_configured; then
@@ -492,11 +614,14 @@ cmd_backup_remoto() {
 }
 
 remote_connect() {
-    local kind=${1:-} key='' arg='' folder pw=''
+    local kind=${1:-} key='' arg='' folder pw='' token_file='' password_file=''
     shift || true
     while (($#)); do
         case $1 in
             --chiave) [[ $# -ge 2 ]] || die "manca la chiave dopo --chiave"; key=$2; shift 2 ;;
+            # Senza terminale (pagina Backup di /techadmin): token di Google già ottenuto, password SFTP in un file.
+            --token-file) [[ $# -ge 2 && -f $2 ]] || die "file del token mancante"; token_file=$2; shift 2 ;;
+            --password-file) [[ $# -ge 2 && -f $2 ]] || die "file della password mancante"; password_file=$2; shift 2 ;;
             *) arg=$1; shift ;;
         esac
     done
@@ -514,6 +639,15 @@ remote_connect() {
     tmp=$(mktemp "$REMOTE_DIR/.rclone-XXXXXX")
     case $kind in
         gdrive)
+            if [[ -n $token_file ]]; then
+                local token
+                # shellcheck disable=SC2016  # codice PHP, non variabili della shell
+                token=$(php -r '$t = json_decode(file_get_contents($argv[1]), true);
+                    if (!is_array($t) || !isset($t["access_token"]) || !is_string($t["access_token"])) { exit(1); }
+                    echo json_encode($t, JSON_UNESCAPED_SLASHES);' "$token_file") || { rm -f "$tmp"; die "token di Google non valido"; }
+                printf '[emp-destinazione]\ntype = drive\nscope = drive.file\ntoken = %s\n\n' "$token" > "$tmp"
+                echo "Google Drive ($folder)" > "$REMOTE_DIR/destinazione"
+            else
             echo
             echo "Collegamento a Google Drive. Serve un browser: dal PC, apri una NUOVA connessione SSH così:"
             echo
@@ -524,12 +658,17 @@ remote_connect() {
             echo
             rclone --config "$tmp" config create emp-destinazione drive scope=drive.file >/dev/null \
                 || { rm -f "$tmp"; die "collegamento a Google Drive non riuscito"; }
-            echo "Google Drive ($folder)" > "$REMOTE_DIR/destinazione" ;;
+            echo "Google Drive ($folder)" > "$REMOTE_DIR/destinazione"
+            fi ;;
         sftp)
             [[ $arg =~ ^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+(:[0-9]+)?$ ]] || die "uso: emp-server backup-remoto collega sftp utente@host[:porta]"
             local user=${arg%@*} hostport=${arg#*@} port=22
             [[ $hostport == *:* ]] && port=${hostport##*:}
-            read -rs -p "Password SFTP di ${arg} (vuota per usare la chiave SSH di root): " pw; echo
+            if [[ -n $password_file ]]; then
+                pw=$(head -c 512 "$password_file")
+            else
+                read -rs -p "Password SFTP di ${arg} (vuota per usare la chiave SSH di root): " pw; echo
+            fi
             rclone --config "$tmp" config create emp-destinazione sftp host="${hostport%%:*}" user="$user" port="$port" ${pw:+pass="$pw"} --obscure >/dev/null \
                 || { rm -f "$tmp"; die "configurazione SFTP non riuscita"; }
             echo "SFTP ${arg} ($folder)" > "$REMOTE_DIR/destinazione" ;;
@@ -563,6 +702,27 @@ remote_connect() {
 
 # ---------------------------------------------------------------- ripristino
 
+# Scarica e decifra un backup remoto nella cartella dei backup locali.
+download_remote() {
+    local remote=$1
+    [[ $remote =~ ^emp-backup-[a-z0-9.-]+\.tar$ && $remote != *..* ]] || die "nome di backup remoto non valido (vedi: sudo emp-server backup-elenco)"
+    remote_configured || die "nessuna destinazione remota collegata (sudo emp-server backup-remoto collega … --chiave CHIAVE)"
+    install -d -m 0700 -o root -g root "$EMP_BACKUP"
+    info "Download e decifratura di $remote da $(remote_description)"
+    rclone_emp copyto "emp-cifrato:$remote" "$EMP_BACKUP/$remote.parziale" \
+        || { rm -f "$EMP_BACKUP/$remote.parziale"; die "download non riuscito (chiave sbagliata o destinazione non raggiungibile)"; }
+    chgrp "$EMP_SCP_GROUP" "$EMP_BACKUP/$remote.parziale" 2>/dev/null || true
+    chmod 0640 "$EMP_BACKUP/$remote.parziale"
+    mv "$EMP_BACKUP/$remote.parziale" "$EMP_BACKUP/$remote"
+}
+
+cmd_backup_scarica() {
+    require_root backup-scarica
+    [[ ${1:-} == --remoto && -n ${2:-} ]] || die "uso: sudo emp-server backup-scarica --remoto NOME (elenco: sudo emp-server backup-elenco)"
+    download_remote "$2"
+    info "Backup disponibile su questa macchina: $EMP_BACKUP/$2"
+}
+
 manifest_field() { sed -n "s/^$2=//p" "$1/MANIFEST" | head -n1; }
 
 health_ok() {
@@ -587,12 +747,8 @@ cmd_ripristina() {
         esac
     done
     if [[ -n $remote ]]; then
-        [[ $remote =~ ^emp-backup-[a-z0-9.-]+\.tar$ && $remote != *..* ]] || die "nome di backup remoto non valido (vedi: sudo emp-server backup-elenco)"
-        remote_configured || die "nessuna destinazione remota collegata (sudo emp-server backup-remoto collega … --chiave CHIAVE)"
+        download_remote "$remote"
         file="$EMP_BACKUP/$remote"
-        info "Download e decifratura di $remote da $(remote_description)"
-        rclone_emp copyto "emp-cifrato:$remote" "$file" || die "download non riuscito (chiave sbagliata o destinazione non raggiungibile)"
-        chmod 0600 "$file"
     fi
     [[ -n $file && -f $file ]] || die "uso: sudo emp-server ripristina FILE | --remoto NOME  (elenco: sudo emp-server backup-elenco)"
 
@@ -670,7 +826,7 @@ SQL
         systemctl start "$fpm" nginx
         core_cli installa --utente=installer | sed 's/^/  /'
     fi
-    systemctl start emp-backup.timer 2>/dev/null || true
+    apply_backup_timer
     health_ok || die "il Core non risponde dopo il ripristino: controllare $EMP_LOGS"
     echo
     info "Ripristino completato: EMP Server ${bserver}, Core ${bcore}, dati del $(manifest_field "$work" creato)"
@@ -751,7 +907,7 @@ SQL
     # Moduli: resta solo il Core; via plugin installati, caricati, backup e versioni precedenti.
     find "$EMP_MODULES" -mindepth 1 -maxdepth 1 ! -name emp-core -exec rm -rf -- {} +
     rm -rf "$EMP_DATA/catalogo-locale" "$EMP_DATA/tmp" "$EMP_BACKUP" "$EMP_DATA/precedenti" "$EMP_DATA/arrivi" \
-        "$EMP_DATA/pubblico/emp-ca.crt" "$EMP_DATA"/.core-*
+        "$EMP_DATA/pubblico/emp-ca.crt" "$EMP_DATA"/.core-* "$EMP_DATA/backup-web" "$EMP_DATA/scaricamenti"
     create_dirs
     info "Dati, plugin, catalogo locale e backup di prova cancellati"
 
@@ -762,8 +918,10 @@ SQL
     info "Registri di prova cancellati"
 
     # Identità HTTPS, nome DNS aggiuntivo e destinazione dei backup remoti appartengono alla macchina d'origine.
-    rm -rf "$EMP_TLS" "$REMOTE_DIR"
-    rm -f "$EMP_CONF_DIR/nome-dns"
+    # Anche le impostazioni dei backup: il clone riparte da quelle predefinite.
+    rm -rf "$EMP_TLS" "$REMOTE_DIR" "$BACKUP_TIMER_DROPIN_DIR"
+    rm -f "$EMP_CONF_DIR/nome-dns" "$BACKUP_CONF"
+    systemctl daemon-reload 2>/dev/null || true
     if [[ -f $EMP_CONF_DIR/github.conf ]]; then
         sed -i -E 's/^EMP_NOME_DNS=.*/EMP_NOME_DNS=/' "$EMP_CONF_DIR/github.conf"
     fi
@@ -818,6 +976,7 @@ EOF
     fpm="php$(php_version)-fpm"
     systemctl start "$fpm" nginx
     systemctl start emp-backup.timer emp-certificato.timer
+    systemctl restart emp-backup-web.path 2>/dev/null || true   # cartella delle richieste ricreata
     for _ in $(seq 1 30); do
         if curl -fsS --max-time 5 --cacert "$EMP_TLS/ca.crt" --resolve "localhost:443:127.0.0.1" \
             https://localhost/api/v1/salute >/dev/null 2>&1; then
@@ -877,7 +1036,9 @@ main() {
         recupero-tecnico) cmd_recupero_tecnico "$@" ;;
         certificato) cmd_certificato "$@" ;;
         backup) cmd_backup "$@" ;;
-        backup-elenco) cmd_backup_elenco ;;
+        backup-elenco) cmd_backup_elenco "$@" ;;
+        backup-impostazioni) cmd_backup_impostazioni "$@" ;;
+        backup-scarica) cmd_backup_scarica "$@" ;;
         backup-remoto) cmd_backup_remoto "$@" ;;
         ripristina) cmd_ripristina "$@" ;;
         accesso-scp) cmd_accesso_scp "$@" ;;

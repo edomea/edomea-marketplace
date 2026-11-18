@@ -239,6 +239,22 @@ final class AccessService
 
     // ------------------------------------------------------------------ password
 
+    /**
+     * Conferma della password dell'utente già collegato, prima di un'operazione delicata
+     * (chiave dei backup, download o ripristino di un backup). Tentativi limitati come l'accesso.
+     */
+    public function confirmPassword(User $user, string $password, string $ip, string $purpose): void
+    {
+        $this->assertNotLocked($user->username, $ip, 'conferma');
+        $row = $this->findById($user->id);
+        if ($row === null || !password_verify($password, (string) $row['password_hash'])) {
+            $this->recordAttempt($user->username, $ip, 'conferma', false);
+            $this->audit->record($user->username, self::MODULE, 'conferma_password_rifiutata', 'utente', $user->id, 0, null, $purpose);
+            throw new AccessException('Password non corretta', 403);
+        }
+        $this->recordAttempt($user->username, $ip, 'conferma', true);
+    }
+
     /** Cambio della propria password. Chiude le altre sessioni dell'utente. */
     public function changeOwnPassword(User $user, string $current, string $new, ?string $keepToken): void
     {

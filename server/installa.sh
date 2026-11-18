@@ -160,6 +160,7 @@ return [
     'local_catalog_dir' => '${EMP_DATA}/catalogo-locale',
     'server_version' => '${EMP_VERSION}',
     'arrivals_dir' => '${EMP_DATA}/arrivi/plugin',
+    'backup_web_dir' => '${EMP_DATA}/backup-web',
 ];
 EOF
     install -m 0640 -o root -g "$EMP_USER" "$tmp" "$EMP_CONFIG"
@@ -269,15 +270,26 @@ configure_services() {
         info "Firewall attivo: aperte solo le porte 22 (SSH), 80 e 443"
     fi
 
-    install -m 0644 "$SOURCE_DIR"/modelli/systemd/emp-*.service "$SOURCE_DIR"/modelli/systemd/emp-*.timer /etc/systemd/system/
+    install -m 0644 "$SOURCE_DIR"/modelli/systemd/emp-*.service "$SOURCE_DIR"/modelli/systemd/emp-*.timer \
+        "$SOURCE_DIR"/modelli/systemd/emp-*.path /etc/systemd/system/
     systemctl daemon-reload
-    systemctl enable -q --now emp-backup.timer emp-certificato.timer
-    info "Backup ogni notte alle 02:30 in $EMP_BACKUP (ultimi $BACKUP_KEEP); controllo giornaliero del certificato"
+    systemctl enable -q --now emp-certificato.timer emp-backup-web.path
+    systemctl reset-failed emp-backup-web.path emp-backup-web.service 2>/dev/null || true
+    systemctl restart emp-backup-web.path
+    # Orario, attivazione e conservazione dei backup: impostazioni della macchina (pagina Backup di /techadmin).
+    apply_backup_timer
+    if [[ $BACKUP_NIGHTLY == si ]]; then
+        info "Backup ogni notte alle $BACKUP_TIME in $EMP_BACKUP (ultimi $BACKUP_KEEP); controllo giornaliero del certificato"
+    else
+        info "Backup notturno disattivato (pagina Backup di /techadmin); controllo giornaliero del certificato"
+    fi
 }
 
 install_programs() {
     install -d -m 0755 -o root -g root "$EMP_HOME"
     install -m 0755 "$SOURCE_DIR/emp-server" "$EMP_HOME/emp-server"
+    # Esecutore (root) delle richieste della pagina Backup di /techadmin.
+    install -m 0755 "$SOURCE_DIR/emp-backup-web" "$EMP_HOME/emp-backup-web"
     install -m 0644 "$SOURCE_DIR/VERSIONE" "$EMP_HOME/VERSIONE"
     # Script per collegare il Server a GitHub (emp-server collega-github).
     if [[ -d $SOURCE_DIR/github ]]; then

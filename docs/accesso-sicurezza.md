@@ -80,9 +80,11 @@ Nel registro del Core (`core_audit`), senza password, chiavi o token: generazion
 ## 8. Protezioni delle richieste
 
 - Ogni richiesta che modifica dati richiede l'intestazione `X-EMP-Richiesta: 1` e, se il browser invia `Origin`, la stessa origine del Core (protezione CSRF).
-- Primo setup, recupero del Tecnico e gestione plugin: **solo in HTTPS** oppure da richieste fatte sul Server stesso (loopback e `Host` locale), tramite `AdminGuard`.
+- Primo setup, recupero del Tecnico, gestione plugin e backup: **solo in HTTPS** oppure da richieste fatte sul Server stesso (loopback e `Host` locale), tramite `AdminGuard`.
   - Lo stato HTTPS lo stabilisce Nginx (`fastcgi_param HTTPS on`); un'intestazione inviata dal client non vale.
   - Su EMP Server la porta 80 rinvia comunque a HTTPS.
+
+- **Conferma della password** (pagina Backup): mostrare la chiave dei backup, collegare o scollegare la destinazione remota, scaricare o ripristinare un backup richiedono di nuovo la password del Tecnico già collegato. I tentativi sbagliati sono limitati come l'accesso (5 in 15 minuti) e registrati (`conferma_password_rifiutata`).
 
 ## 9. Limiti noti e punti rinviati
 

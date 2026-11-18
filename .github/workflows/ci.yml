@@ -38,6 +38,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - run: php -l server/emp-backup-web
       - run: shellcheck -x server/installa.sh server/emp-server server/disinstalla.sh tools/build-server.sh server/github/emp-installa-da-github server/github/prepara-runner.sh
       - name: Pacchetto riproducibile
         run: |
@@ -191,6 +192,64 @@ jobs:
           test ! -e /var/lib/emp/arrivi/plugin/emp-esempio-0.1.1.zip
           sudo emp-server accesso-scp tecnico-pc --togli
           if sudo -u tecnico-pc cat "$BK" >/dev/null 2>&1; then exit 1; fi
+          # Pagina Backup di /techadmin: le stesse operazioni dal web, eseguite da EMP Server (emp-backup-web).
+          W=(-b "$RUNNER_TEMP/jar" "${J[@]}")
+          attendi() { # $1 = richiesta, $2 = secondi massimi; stampa l'esito, fallisce se non riuscito
+            local _ out
+            for _ in $(seq 1 "${2:-120}"); do
+              out=$(curl -s -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/backup/richiesta/$1" || true)
+              if grep -q '"pronta":true' <<<"$out"; then echo "$out"; grep -q '"ok":true' <<<"$out"; return; fi
+              sleep 1
+            done
+            echo "richiesta $1 senza esito" >&2; return 1
+          }
+          richiesta() { # $1 = operazione, $2 = corpo JSON (facoltativo); stampa l'identificativo della richiesta
+            local body='{}'
+            [[ -z ${2:-} ]] || body=$2
+            curl -fsS "${W[@]}" -X POST "$B/api/v1/backup/$1" -d "$body" | jq -er .richiesta
+          }
+          test "$(code --cacert "$CA" "$B/api/v1/backup")" = 401
+          curl -fsS --cacert "$CA" -o /dev/null "$B/techadmin/backup.html"
+          attendi "$(richiesta aggiorna)" > /dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/backup" | tee "$RUNNER_TEMP/backup-stato.json" | jq -e '.disponibile and .stato.destinazione.collegata and .stato.destinazione.raggiungibile' >/dev/null
+          PRIMA=$(jq '.stato.locali | length' "$RUNNER_TEMP/backup-stato.json")
+          attendi "$(richiesta esegui)" 300 | tee /dev/stderr | grep -q 'Backup eseguito'
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/backup" | jq -e ".stato.locali | length == $((PRIMA + 1))" >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/backup" | jq -e '.stato.remoti | length >= 2' >/dev/null
+          # Impostazioni applicate alla macchina (file e timer di systemd).
+          attendi "$(richiesta impostazioni '{"ora":"04:10","notturno":true,"conserva_locali":20,"conserva_remoti":40}')" > /dev/null
+          grep -q '^ORA=04:10$' /etc/emp/backup.conf
+          systemctl show emp-backup.timer -p TimersCalendar | tee /dev/stderr | grep -q '04:10:00'
+          systemctl is-enabled emp-backup.timer
+          # Chiave: password sbagliata rifiutata; con la password, la stessa della console.
+          test "$(code "${W[@]}" -X POST "$B/api/v1/backup/chiave" -d '{"password":"sbagliata"}')" = 403
+          attendi "$(richiesta chiave '{"password":"Chiave-Sicura-CI-2026"}')" | jq -er .dati.chiave | diff - "$RUNNER_TEMP/chiave-backup"
+          # La chiave non finisce nei file leggibili dal Core.
+          if sudo grep -rqF "$(cat "$RUNNER_TEMP/chiave-backup")" /var/lib/emp/backup-web; then exit 1; fi
+          # Download di un backup locale e di uno remoto (decifrato sul Server): uguali all'originale.
+          ULTIMO=$(curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/backup" | jq -er '.stato.locali[0].nome')
+          TOKEN=$(attendi "$(richiesta scarica "{\"nome\":\"$ULTIMO\",\"origine\":\"locale\",\"password\":\"Chiave-Sicura-CI-2026\"}")" | jq -er .dati.token)
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" -o "$RUNNER_TEMP/scaricato.tar" -D "$RUNNER_TEMP/scaricato.h" "$B/api/v1/backup/file/$TOKEN"
+          grep -qi "content-disposition: attachment; filename=\"$ULTIMO\"" "$RUNNER_TEMP/scaricato.h"
+          test "$(sha256sum "$RUNNER_TEMP/scaricato.tar" | cut -d' ' -f1)" = "$(sudo sha256sum "/var/lib/emp/backup/$ULTIMO" | cut -d' ' -f1)"
+          test "$(code --cacert "$CA" "$B/_emp_scaricamenti/$TOKEN.tar")" = 404
+          test "$(code --cacert "$CA" "$B/api/v1/backup/file/$TOKEN")" = 401
+          # Il processo web (utente emp) non legge né i backup né i file da scaricare.
+          if sudo -u emp cat "/var/lib/emp/backup/$ULTIMO" > /dev/null; then exit 1; fi
+          if sudo -u emp ls /var/lib/emp/scaricamenti; then exit 1; fi
+          REMOTO_NOME=$(curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/backup" | jq -er '.stato.remoti[-1].nome')
+          sudo rm -f "/var/lib/emp/backup/$REMOTO_NOME"
+          TOKEN=$(attendi "$(richiesta scarica "{\"nome\":\"$REMOTO_NOME\",\"origine\":\"remoto\",\"password\":\"Chiave-Sicura-CI-2026\"}")" 300 | jq -er .dati.token)
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" -o "$RUNNER_TEMP/remoto.tar" "$B/api/v1/backup/file/$TOKEN"
+          tar -xOf "$RUNNER_TEMP/remoto.tar" MANIFEST | grep -q "^emp_server=$(cat server/VERSIONE)$"
+          # Ripristino dal web: EMP si ferma e riparte; sessione, utenti e plugin del backup.
+          test "$(code "${W[@]}" -X POST "$B/api/v1/backup/ripristina" -d "{\"nome\":\"$ULTIMO\",\"origine\":\"locale\",\"password\":\"Chiave-Sicura-CI-2026\"}")" = 409
+          attendi "$(richiesta ripristina "{\"nome\":\"$ULTIMO\",\"origine\":\"locale\",\"password\":\"Chiave-Sicura-CI-2026\",\"conferma\":\"RIPRISTINA\"}")" 600 | tee /dev/stderr | grep -q 'Ripristino completato'
+          sudo sh -c 'ls /var/lib/emp/backup/emp-backup-*-prima-del-ripristino.tar'
+          curl -fsS --cacert "$CA" "$B/api/v1/esempio" | grep -q '"modulo":"emp-esempio"'
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/backup" | jq -e '.lavoro.esito == 0' >/dev/null
+          # Impostazioni della macchina: non toccate dal ripristino.
+          grep -q '^ORA=04:10$' /etc/emp/backup.conf
           printf 'Recupero-Console-CI-2026\n' | sudo emp-server recupero-tecnico tecnico | grep -q 'Nuova Recovery Key: EMP-'
           curl -fsS "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
           sudo ufw status | tee /dev/stderr | grep -q '443/tcp'
@@ -263,6 +322,7 @@ jobs:
           sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -text | grep -q 'DNS:cliente-prova'
           # Anche il collegamento ai backup remoti apparteneva al master.
           sudo test ! -e /etc/emp/backup-remoto
+          sudo test ! -e /etc/emp/backup.conf
           # Di nuovo pronto per il primo setup, con il codice mostrato da azzera.
           CA=$RUNNER_TEMP/ca-cliente.crt
           sudo cat /etc/emp/tls/ca.crt > "$CA"
@@ -299,4 +359,6 @@ jobs:
         if: failure()
         run: |
           sudo tail -n 50 /var/log/nginx/emp-errori.log /var/log/emp/php-errori.log 2>/dev/null || true
+          sudo journalctl -u emp-backup-web.service -u emp-backup-web.path --no-pager -n 80 || true
+          sudo cat /var/lib/emp/backup-web/lavoro.json || true
           sudo journalctl -u nginx -u 'php*-fpm' -u mariadb --no-pager -n 80 || true

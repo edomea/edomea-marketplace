@@ -1,0 +1,12 @@
+[Unit]
+Description=EMP Server — esecuzione delle richieste della pagina Backup di /techadmin
+After=mariadb.service
+# Ogni richiesta della pagina avvia il servizio: nessun limite di avvii ravvicinati
+# (con il limite predefinito, 5 in 10 secondi, le richieste resterebbero in coda).
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/opt/emp/server/emp-backup-web
+# Backup e ripristino di installazioni grandi possono durare a lungo.
+TimeoutStartSec=6h

@@ -1,0 +1,8 @@
+[Unit]
+Description=EMP Server — richieste della pagina Backup di /techadmin
+
+[Path]
+DirectoryNotEmpty=/var/lib/emp/backup-web/richieste
+
+[Install]
+WantedBy=paths.target

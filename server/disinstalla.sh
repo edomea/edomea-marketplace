@@ -26,9 +26,10 @@ for pool in /etc/php/*/fpm/pool.d/emp.conf; do
 done
 
 echo "• Operazioni pianificate"
-systemctl disable -q --now emp-backup.timer emp-certificato.timer 2>/dev/null || true
+systemctl disable -q --now emp-backup.timer emp-certificato.timer emp-backup-web.path 2>/dev/null || true
 rm -f /etc/systemd/system/emp-backup.service /etc/systemd/system/emp-backup.timer \
-      /etc/systemd/system/emp-certificato.service /etc/systemd/system/emp-certificato.timer
+      /etc/systemd/system/emp-certificato.service /etc/systemd/system/emp-certificato.timer \
+      /etc/systemd/system/emp-backup-web.service /etc/systemd/system/emp-backup-web.path
 systemctl daemon-reload
 
 echo "• Comando emp-server"

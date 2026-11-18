@@ -185,7 +185,7 @@ jobs:
           if sudo -u tecnico-pc cat "$BK" >/dev/null 2>&1; then exit 1; fi
           sudo emp-server accesso-scp tecnico-pc
           sudo -u tecnico-pc cat "$BK" | tar -t >/dev/null
-          sudo -u tecnico-pc cp "$ZIP" /var/lib/emp/arrivi/plugin/emp-esempio-0.1.1.zip
+          sudo -u tecnico-pc tee /var/lib/emp/arrivi/plugin/emp-esempio-0.1.1.zip < "$ZIP" >/dev/null
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin/arrivi" | tee /dev/stderr | grep -q '"nome":"emp-esempio-0.1.1.zip"'
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/arrivi/aggiungi" -d '{"file":"emp-esempio-0.1.1.zip"}' | grep -q '"ok":true'
           test ! -e /var/lib/emp/arrivi/plugin/emp-esempio-0.1.1.zip

@@ -111,6 +111,9 @@ create_layout() {
     if ! id -u "$EMP_USER" >/dev/null 2>&1; then
         useradd --system --home-dir "$EMP_DATA" --no-create-home --shell /usr/sbin/nologin "$EMP_USER"
         info "Creato l'utente di sistema $EMP_USER"
+    elif emp_user_is_personal; then
+        # Ubuntu installato con l'utente "emp": per ora EMP lo usa, ma va sostituito (avviso nel riepilogo).
+        info "ATTENZIONE: '$EMP_USER' è un account personale: vedere l'avviso alla fine"
     fi
     create_dirs
     if [[ -n ${EMP_NOME_DNS:-} ]]; then
@@ -156,6 +159,7 @@ return [
     'catalog_dir' => '${EMP_DATA}/catalogo',
     'local_catalog_dir' => '${EMP_DATA}/catalogo-locale',
     'server_version' => '${EMP_VERSION}',
+    'arrivals_dir' => '${EMP_DATA}/arrivi/plugin',
 ];
 EOF
     install -m 0640 -o root -g "$EMP_USER" "$tmp" "$EMP_CONFIG"
@@ -342,8 +346,9 @@ summary() {
         echo "    Se scade o si perde: sudo emp-server codice-setup"
     fi
     echo
-    echo " Gestione: sudo emp-server stato | backup | ripristina | backup-remoto | certificato | collega-github"
+    echo " Gestione: sudo emp-server stato | backup | ripristina | backup-remoto | accesso-scp | certificato | collega-github"
     echo
+    warn_personal_emp_user
 }
 
 main() {

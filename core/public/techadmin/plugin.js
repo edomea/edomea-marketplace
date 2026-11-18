@@ -3,6 +3,7 @@
  * Pagina Plugin del Core EMP.
  * API: GET /api/v1/plugin, POST /api/v1/plugin/{id}/installa, POST /api/v1/plugin/{id}/disinstalla,
  *      POST /api/v1/plugin/carica, POST /api/v1/plugin/{id}/rimuovi-pacchetto,
+ *      GET /api/v1/plugin/arrivi, POST /api/v1/plugin/arrivi/aggiungi|elimina,
  *      GET/POST /api/v1/plugin/github, GET /api/v1/plugin/github/release, POST /api/v1/plugin/github/importa
  * Helper standard Edomea: api(), esc(), toast().
  */
@@ -140,6 +141,49 @@ document.getElementById("carica").addEventListener("submit", async (ev) => {
   }
 });
 
+// ---- Pacchetti arrivati via scp -------------------------------------------------------------
+async function loadArrivals() {
+  const box = document.getElementById("arrivi-box");
+  let data;
+  try {
+    data = await api("plugin/arrivi");
+  } catch (e) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  document.getElementById("arrivi-cartella").textContent = data.cartella;
+  const body = document.querySelector("#arrivi tbody");
+  body.replaceChildren();
+  if (data.file.length === 0) {
+    const tr = document.createElement("tr");
+    tr.appendChild(cell("Nessun pacchetto arrivato."));
+    tr.firstChild.colSpan = 4;
+    body.appendChild(tr);
+    return;
+  }
+  for (const f of data.file) {
+    const tr = document.createElement("tr");
+    tr.appendChild(cell(f.nome, f.leggibile ? "" : "Non leggibile dal Core: ricaricarlo con permessi di lettura"));
+    tr.appendChild(cell((f.dimensione / 1048576).toFixed(1) + " MB"));
+    tr.appendChild(cell(EMP.fmtDateTime(new Date(f.arrivato_il))));
+    const td = document.createElement("td");
+    const act = (azione, etichetta, classe) => button(etichetta, classe, () => askConfirm(td, etichetta, async () => {
+      try {
+        const out = await EMP.api("plugin/arrivi/" + azione, "POST", { file: f.nome });
+        toast(out.operazioni.join("\n"));
+      } catch (e) {
+        toast(e.message, true);
+      }
+      await Promise.all([load(), loadArrivals()]);
+    }, () => loadArrivals()));
+    if (f.leggibile) td.appendChild(act("aggiungi", "Aggiungi", ""));
+    td.appendChild(act("elimina", "Elimina", "secondario"));
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+}
+
 // ---- Sorgente GitHub facoltativa ----------------------------------------------------------
 async function loadGithub() {
   try {
@@ -215,4 +259,5 @@ document.getElementById("github-cerca").addEventListener("click", async (ev) => 
 
 EMP.api("accesso/stato").then((s) => EMP.showUser(s.utente)).catch(() => {});
 load();
+loadArrivals();
 loadGithub();

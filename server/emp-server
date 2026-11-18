@@ -10,6 +10,8 @@
 #   sudo emp-server backup-elenco                  backup su questa macchina e sulla destinazione remota
 #   sudo emp-server backup-remoto collega gdrive   copia cifrata di ogni backup su Google Drive (anche sftp)
 #   sudo emp-server ripristina FILE|--remoto NOME  rimette EMP com'era nel backup (stessa o nuova macchina)
+#   sudo emp-server accesso-scp NOME [--togli]     backup scaricabili e plugin caricabili via scp per NOME
+#   sudo emp-server elimina-vecchio-utente         elimina l'account personale "emp" (EMP usa un utente di sistema)
 #   sudo emp-server moduli                         moduli installati (Core e plugin)
 #   sudo emp-server azzera --nome NOME             total reset di un clone del master (dati, identità, nome)
 #   sudo emp-server collega-github                 collega questo Server a GitHub (token da GitHub)
@@ -45,6 +47,10 @@ core_cli() {
     runuser -u "$EMP_USER" -- env EMP_CONFIG="$EMP_CONFIG" php "$EMP_MODULES/emp-core/bin/emp" "$@"
 }
 
+# Primo indirizzo privato. sed legge tutto l'elenco: con "head -n1" la funzione verrebbe
+# interrotta (SIGPIPE) sulle macchine con più indirizzi e, con pipefail, lo script si fermerebbe.
+first_private_ipv4() { private_ipv4 | sed -n 1p; }
+
 # Indirizzi IPv4 privati della macchina (quelli coperti dal certificato).
 private_ipv4() {
     local ip
@@ -67,7 +73,13 @@ create_dirs() {
     # Catalogo locale del Core: plugin caricati a mano dal Tecnico o importati da una release GitHub.
     install -d -m 0750 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/catalogo-locale"
     install -d -m 0700 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/tmp"
-    install -d -m 0700 -o root -g root "$EMP_BACKUP"
+    # Backup e arrivi dei plugin raggiungibili via scp dagli utenti abilitati (gruppo emp-file).
+    getent group "$EMP_SCP_GROUP" >/dev/null || groupadd --system "$EMP_SCP_GROUP"
+    install -d -m 0750 -o root -g "$EMP_SCP_GROUP" "$EMP_BACKUP"
+    find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -exec chgrp "$EMP_SCP_GROUP" {} + -exec chmod 0640 {} +
+    install -d -m 0755 -o root -g root "$EMP_DATA/arrivi"
+    # setgid: i file caricati restano del gruppo emp-file; il Core (proprietario) li legge e li elimina.
+    install -d -m 2770 -o "$EMP_USER" -g "$EMP_SCP_GROUP" "$EMP_ARRIVALS"
     install -d -m 0750 -o "$EMP_USER" -g adm "$EMP_LOGS"
     install -d -m 0755 -o root -g root "$EMP_CONF_DIR"
 }
@@ -197,6 +209,7 @@ cmd_stato() {
     local last
     last=$(find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf '%T@ %f\n' 2>/dev/null | sort -rn | sed -n '1s/^[^ ]* //p')
     echo "Ultimo backup: ${last:-nessuno}"
+    warn_personal_emp_user
     if [[ -f $REMOTE_CONF ]]; then echo "Copia remota: $(remote_description)"; else echo "Copia remota: non collegata (sudo emp-server backup-remoto collega gdrive)"; fi
     echo "Indirizzi:"
     cmd_indirizzi
@@ -216,6 +229,99 @@ cmd_recupero_tecnico() {
     require_root recupero-tecnico
     [[ -n ${1:-} ]] || die "uso: sudo emp-server recupero-tecnico NOME_UTENTE_DEL_TECNICO"
     core_cli recupero-tecnico "--tecnico=$1"
+}
+
+# ---------------------------------------------------------------- utenti, accesso scp, arrivi
+
+readonly EMP_SCP_GROUP=emp-file
+readonly EMP_ARRIVALS=$EMP_DATA/arrivi/plugin
+
+# Un account "personale" (creato con l'installazione di Ubuntu o con adduser) ha UID da 1000 in su.
+# L'utente di EMP deve essere di sistema: niente accesso SSH, niente sudo, niente home.
+emp_user_is_personal() {
+    local uid min
+    uid=$(id -u "$EMP_USER" 2>/dev/null) || return 1
+    min=$(awk '/^UID_MIN/ {print $2}' /etc/login.defs 2>/dev/null)
+    ((uid >= ${min:-1000} && uid != 65534))
+}
+
+warn_personal_emp_user() {
+    emp_user_is_personal || return 0
+    echo
+    echo "ATTENZIONE: l'utente '$EMP_USER' è un account personale (accesso SSH, sudo): EMP gira con i suoi permessi."
+    echo "  1. crea il tuo utente:     sudo adduser NOME && sudo usermod -aG sudo NOME"
+    echo "  2. rientra con quello:     ssh NOME@$(first_private_ipv4)"
+    echo "  3. elimina il vecchio:     sudo emp-server elimina-vecchio-utente"
+    echo
+}
+
+cmd_elimina_vecchio_utente() {
+    require_root elimina-vecchio-utente
+    local yes=0
+    [[ ${1:-} == --si ]] && yes=1
+    if ! emp_user_is_personal; then
+        info "L'utente '$EMP_USER' è già un utente di sistema: niente da fare"
+        return 0
+    fi
+    local admin=${SUDO_USER:-}
+    [[ -n $admin && $admin != root && $admin != "$EMP_USER" ]] \
+        || die "eseguire con sudo da un ALTRO utente amministratore (es. ssh NOME@server, poi sudo emp-server elimina-vecchio-utente)"
+    # Sessioni ancora aperte del vecchio account (escluso PHP-FPM, che viene fermato qui).
+    local others
+    others=$(pgrep -u "$EMP_USER" -l 2>/dev/null | awk '$2 !~ /^php-fpm/ {print $2}' | sort -u | tr '\n' ' ' || true)
+    [[ -z ${others// /} ]] || die "l'utente '$EMP_USER' ha ancora processi aperti ($others): chiudere le sue sessioni SSH e riprovare"
+    local home
+    home=$(getent passwd "$EMP_USER" | cut -d: -f6)
+    echo "Verrà ELIMINATO l'account personale '$EMP_USER' (UID $(id -u "$EMP_USER")) con la sua cartella ${home:-?}."
+    echo "Al suo posto EMP avrà un utente di sistema '$EMP_USER': niente accesso SSH, niente sudo."
+    echo "Amministratore che resta: $admin. Dati, database e plugin di EMP non vengono toccati."
+    if ((!yes)); then
+        local answer
+        read -r -p "Scrivi ELIMINA per continuare: " answer
+        [[ $answer == ELIMINA ]] || die "annullato: nessuna modifica"
+    fi
+
+    local old_uid old_gid fpm
+    old_uid=$(id -u "$EMP_USER")
+    old_gid=$(id -g "$EMP_USER")
+    fpm="php$(php_version)-fpm"
+    systemctl stop "$fpm"
+    pkill -u "$EMP_USER" 2>/dev/null || true
+    sleep 1
+    userdel -r "$EMP_USER" 2>/dev/null || userdel "$EMP_USER"
+    rm -f "/etc/sudoers.d/$EMP_USER"
+    getent group "$EMP_USER" >/dev/null || groupadd --system "$EMP_USER"
+    useradd --system -g "$EMP_USER" --home-dir "$EMP_DATA" --no-create-home --shell /usr/sbin/nologin "$EMP_USER"
+    # I file del vecchio account (dati di EMP, registri, sessioni) passano al nuovo utente di sistema.
+    find / -xdev \( -path /proc -o -path /sys -o -path /dev \) -prune -o -uid "$old_uid" -exec chown -h "$EMP_USER" {} + 2>/dev/null || true
+    find / -xdev \( -path /proc -o -path /sys -o -path /dev \) -prune -o -gid "$old_gid" -exec chgrp -h "$EMP_USER" {} + 2>/dev/null || true
+    create_dirs
+    systemctl start "$fpm"
+    health_ok || die "il Core non risponde dopo il cambio di utente: controllare $EMP_LOGS"
+    info "Vecchio account eliminato. '$EMP_USER' è ora un utente di sistema (UID $(id -u "$EMP_USER"))."
+    info "Per scaricare i backup e caricare i plugin via scp: sudo emp-server accesso-scp $admin"
+}
+
+cmd_accesso_scp() {
+    require_root accesso-scp
+    local name=${1:-} remove=0
+    [[ ${2:-} == --togli ]] && remove=1
+    [[ -n $name ]] || die "uso: sudo emp-server accesso-scp NOMEUTENTE [--togli]"
+    id -u "$name" >/dev/null 2>&1 || die "utente '$name' inesistente"
+    [[ $name != "$EMP_USER" && $name != root ]] || die "'$name' non può avere l'accesso scp"
+    getent group "$EMP_SCP_GROUP" >/dev/null || groupadd --system "$EMP_SCP_GROUP"
+    if ((remove)); then
+        gpasswd -d "$name" "$EMP_SCP_GROUP" >/dev/null 2>&1 || true
+        info "Accesso scp tolto a $name"
+        return 0
+    fi
+    usermod -aG "$EMP_SCP_GROUP" "$name"
+    local ip
+    ip=$(first_private_ipv4)
+    info "Accesso scp dato a $name (vale dal prossimo accesso SSH di $name)"
+    echo "  Scaricare un backup, dal PC:   scp $name@$ip:$EMP_BACKUP/emp-backup-….tar ."
+    echo "  Caricare un plugin, dal PC:    scp mio-plugin.zip $name@$ip:$EMP_ARRIVALS/"
+    echo "  I plugin caricati compaiono nella pagina Plugin del Tecnico (https://$ip/techadmin/plugin.html)."
 }
 
 # ---------------------------------------------------------------- backup e ripristino di EMP
@@ -285,7 +391,6 @@ cmd_backup() {
     core=$(installed_core_version)
     stamp=$(date +%Y%m%d-%H%M%S)
     name="emp-backup-$(host_name)-${stamp}${label:+-$label}"
-    install -d -m 0700 -o root -g root "$EMP_BACKUP"
     new_temp_dir work "$EMP_BACKUP"
 
     mariadb-dump --single-transaction --routines --events --triggers --hex-blob \
@@ -313,7 +418,8 @@ cmd_backup() {
     ( cd "$work" && sha256sum MANIFEST database.sql.gz dati.tar.gz ${package:+"$package"} > SHA256SUMS )
     file="$EMP_BACKUP/$name.tar"
     tar -C "$work" -cf "$file.parziale" MANIFEST SHA256SUMS database.sql.gz dati.tar.gz ${package:+"$package"}
-    chmod 0600 "$file.parziale"
+    chgrp "$EMP_SCP_GROUP" "$file.parziale" 2>/dev/null || true
+    chmod 0640 "$file.parziale"
     mv "$file.parziale" "$file"
     rm -rf "$work"
     info "Backup di EMP (Server ${server}, Core ${core}): $file ($(du -h "$file" | cut -f1))"
@@ -411,7 +517,7 @@ remote_connect() {
             echo
             echo "Collegamento a Google Drive. Serve un browser: dal PC, apri una NUOVA connessione SSH così:"
             echo
-            echo "    ssh -L 53682:127.0.0.1:53682 $(id -un "${SUDO_USER:-root}" 2>/dev/null || echo utente)@$(private_ipv4 | head -n1)"
+            echo "    ssh -L 53682:127.0.0.1:53682 $(id -un "${SUDO_USER:-root}" 2>/dev/null || echo utente)@$(first_private_ipv4)"
             echo
             echo "poi apri in Chrome il link http://127.0.0.1:53682/... che compare qui sotto e accedi con l'account Google dei backup."
             echo "EMP vede solo i file che crea lui su Drive (permesso drive.file), nella cartella $folder."
@@ -483,7 +589,6 @@ cmd_ripristina() {
     if [[ -n $remote ]]; then
         [[ $remote =~ ^emp-backup-[a-z0-9.-]+\.tar$ && $remote != *..* ]] || die "nome di backup remoto non valido (vedi: sudo emp-server backup-elenco)"
         remote_configured || die "nessuna destinazione remota collegata (sudo emp-server backup-remoto collega … --chiave CHIAVE)"
-        install -d -m 0700 -o root -g root "$EMP_BACKUP"
         file="$EMP_BACKUP/$remote"
         info "Download e decifratura di $remote da $(remote_description)"
         rclone_emp copyto "emp-cifrato:$remote" "$file" || die "download non riuscito (chiave sbagliata o destinazione non raggiungibile)"
@@ -645,7 +750,7 @@ SQL
 
     # Moduli: resta solo il Core; via plugin installati, caricati, backup e versioni precedenti.
     find "$EMP_MODULES" -mindepth 1 -maxdepth 1 ! -name emp-core -exec rm -rf -- {} +
-    rm -rf "$EMP_DATA/catalogo-locale" "$EMP_DATA/tmp" "$EMP_BACKUP" "$EMP_DATA/precedenti" \
+    rm -rf "$EMP_DATA/catalogo-locale" "$EMP_DATA/tmp" "$EMP_BACKUP" "$EMP_DATA/precedenti" "$EMP_DATA/arrivi" \
         "$EMP_DATA/pubblico/emp-ca.crt" "$EMP_DATA"/.core-*
     create_dirs
     info "Dati, plugin, catalogo locale e backup di prova cancellati"
@@ -759,7 +864,7 @@ cmd_collega_github() {
 }
 
 usage() {
-    sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -775,6 +880,8 @@ main() {
         backup-elenco) cmd_backup_elenco ;;
         backup-remoto) cmd_backup_remoto "$@" ;;
         ripristina) cmd_ripristina "$@" ;;
+        accesso-scp) cmd_accesso_scp "$@" ;;
+        elimina-vecchio-utente) cmd_elimina_vecchio_utente "$@" ;;
         moduli) cmd_moduli ;;
         azzera) cmd_azzera "$@" ;;
         collega-github) cmd_collega_github "$@" ;;

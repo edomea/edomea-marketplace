@@ -16,6 +16,7 @@ use Emp\Core\Module\Psr4Autoloader;
 use Emp\Core\Module\Registry;
 use Emp\Core\Module\ResolutionException;
 use Emp\Core\Module\Resolver;
+use Emp\Core\Plugin\Arrivals;
 use Emp\Core\Plugin\Catalog;
 use Emp\Core\Plugin\CurlHttpClient;
 use Emp\Core\Plugin\GitHubSource;
@@ -46,6 +47,8 @@ final class Kernel
         private readonly ?HttpClient $http = null,
         /** Versione di EMP Server che ha installato il Core (null fuori da EMP Server). */
         public readonly ?string $serverVersion = null,
+        /** Cartella di arrivo dei plugin caricati via scp (null: funzione non disponibile). */
+        private readonly ?string $arrivalsDir = null,
     ) {
         $this->router = new Router();
         $this->autoloader = new Psr4Autoloader();
@@ -127,6 +130,12 @@ final class Kernel
         }
 
         return new GitHubSource(new LocalCatalog($this->localCatalogDir), $this->http ?? new CurlHttpClient());
+    }
+
+    /** Pacchetti dei plugin arrivati via scp (null senza cartella configurata). */
+    public function arrivals(): ?Arrivals
+    {
+        return $this->arrivalsDir !== null ? new Arrivals($this->arrivalsDir) : null;
     }
 
     /** Registro di tracciabilità del Core. */

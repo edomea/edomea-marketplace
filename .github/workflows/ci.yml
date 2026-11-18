@@ -78,8 +78,25 @@ jobs:
           mkdir -p "$RUNNER_TEMP/inst" && tar -xzf "$RUNNER_TEMP"/dist/emp-server-*.tar.gz -C "$RUNNER_TEMP/inst"
       - name: Prima installazione
         run: |
+          # Come capita installando Ubuntu: l'amministratore della VM si chiama "emp".
+          sudo useradd -m -s /bin/bash -G sudo emp
           cd "$RUNNER_TEMP"/inst/emp-server-*
           sudo ./installa.sh | tee "$RUNNER_TEMP/installa-1.log"
+          grep -q "è un account personale" "$RUNNER_TEMP/installa-1.log"
+      - name: Vecchio account personale "emp" eliminato, EMP con utente di sistema
+        run: |
+          set -euo pipefail
+          # Senza conferma (nessun terminale, niente --si) non cambia nulla.
+          if sudo emp-server elimina-vecchio-utente </dev/null; then exit 1; fi
+          test "$(id -u emp)" -ge 1000
+          sudo emp-server elimina-vecchio-utente --si
+          test "$(id -u emp)" -lt 1000
+          test "$(getent passwd emp | cut -d: -f7)" = /usr/sbin/nologin
+          test ! -d /home/emp
+          if id -nG emp | grep -qw sudo; then exit 1; fi
+          test "$(stat -c %U /var/lib/emp/catalogo-locale)" = emp
+          if sudo emp-server stato | tee /dev/stderr | grep "account personale" >/dev/null; then exit 1; fi
+          sudo emp-server elimina-vecchio-utente | grep -q 'già un utente di sistema'
       - name: Prova completa dalla rete (HTTPS, certificato verificato)
         run: |
           set -euo pipefail
@@ -163,6 +180,17 @@ jobs:
           test -n "$REMOTO"
           if sudo tar -tf "$REMOTO" >/dev/null 2>&1; then exit 1; fi
           sudo emp-server backup-elenco | tee /dev/stderr | grep 'emp-backup-' >/dev/null
+          # Accesso scp: l'utente abilitato legge i backup e carica i plugin negli arrivi.
+          sudo useradd -m tecnico-pc
+          if sudo -u tecnico-pc cat "$BK" >/dev/null 2>&1; then exit 1; fi
+          sudo emp-server accesso-scp tecnico-pc
+          sudo -u tecnico-pc cat "$BK" | tar -t >/dev/null
+          sudo -u tecnico-pc tee /var/lib/emp/arrivi/plugin/emp-esempio-0.1.1.zip < "$ZIP" >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin/arrivi" | tee /dev/stderr | grep -q '"nome":"emp-esempio-0.1.1.zip"'
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/arrivi/aggiungi" -d '{"file":"emp-esempio-0.1.1.zip"}' | grep -q '"ok":true'
+          test ! -e /var/lib/emp/arrivi/plugin/emp-esempio-0.1.1.zip
+          sudo emp-server accesso-scp tecnico-pc --togli
+          if sudo -u tecnico-pc cat "$BK" >/dev/null 2>&1; then exit 1; fi
           printf 'Recupero-Console-CI-2026\n' | sudo emp-server recupero-tecnico tecnico | grep -q 'Nuova Recovery Key: EMP-'
           curl -fsS "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
           sudo ufw status | tee /dev/stderr | grep -q '443/tcp'

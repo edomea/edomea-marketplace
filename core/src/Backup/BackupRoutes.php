@@ -29,6 +29,13 @@ use Emp\Core\Kernel;
  *   GET  /api/v1/backup/richiesta/{id}         esito di una richiesta ({pronta: false} finché è in corso)
  *   GET  /api/v1/backup/file/{token}           scarica il file preparato (Nginx, X-Accel-Redirect)
  *
+ * Pagina Sistema (aggiornamenti dei pacchetti di Ubuntu, stesso servizio di EMP Server):
+ *   GET  /api/v1/sistema                       versione di Ubuntu, aggiornamenti disponibili, riavvio necessario
+ *   POST /api/v1/sistema/verifica              aggiorna l'elenco degli aggiornamenti disponibili
+ *   POST /api/v1/sistema/aggiorna              {password}: backup di EMP, poi installazione degli aggiornamenti
+ *   POST /api/v1/sistema/riavvia               {password, conferma: "RIAVVIA"}: riavvio del server tra 1 minuto
+ *   (l'esito delle richieste si legge da /api/v1/backup/richiesta/{id})
+ *
  * Le operazioni sono eseguite da EMP Server (servizio emp-backup-web): le POST restituiscono
  * l'identificativo della richiesta, la pagina ne legge l'esito. Password, chiavi e token non
  * vanno mai nel registro di tracciabilità.
@@ -126,6 +133,37 @@ final class BackupRoutes
             return self::enqueue($kernel, $user, 'ripristina', ['nome' => $name, 'origine' => $origin], $origin . ' ' . $name);
         }));
 
+        // ---- pagina Sistema -------------------------------------------------------------
+        $r->add('GET', '/api/v1/sistema', $moduleId, static fn (Request $q): Response => self::guarded($kernel, $q, static function (User $user) use ($kernel): Response {
+            $bridge = $kernel->backup();
+            if ($bridge === null || !$bridge->isAvailable()) {
+                return Response::json(['disponibile' => false, 'messaggio' => BackupBridge::unavailableMessage()]);
+            }
+            $o = $bridge->overview();
+            $job = $o['lavoro'];
+            $isSystemJob = is_array($job) && str_starts_with((string) ($job['azione'] ?? ''), 'sistema_');
+
+            return Response::json(['disponibile' => true, 'sistema' => $o['stato']['sistema'] ?? null,
+                'lavoro' => $isSystemJob ? $job : null, 'in_coda' => $o['in_coda']]);
+        }));
+
+        $r->add('POST', '/api/v1/sistema/verifica', $moduleId, static fn (Request $q): Response => self::guarded($kernel, $q, static fn (User $user): Response => self::enqueue($kernel, $user, 'sistema_verifica')));
+
+        $r->add('POST', '/api/v1/sistema/aggiorna', $moduleId, static fn (Request $q): Response => self::guarded($kernel, $q, static function (User $user) use ($kernel, $q): Response {
+            $kernel->access()->confirmPassword($user, $q->input('password'), $q->remoteAddr, 'sistema.aggiorna');
+
+            return self::enqueue($kernel, $user, 'sistema_aggiorna', [], 'Aggiornamenti di Ubuntu richiesti dalla pagina');
+        }));
+
+        $r->add('POST', '/api/v1/sistema/riavvia', $moduleId, static fn (Request $q): Response => self::guarded($kernel, $q, static function (User $user) use ($kernel, $q): Response {
+            if ($q->input('conferma') !== 'RIAVVIA') {
+                throw new BackupException('Per confermare scrivere RIAVVIA');
+            }
+            $kernel->access()->confirmPassword($user, $q->input('password'), $q->remoteAddr, 'sistema.riavvia');
+
+            return self::enqueue($kernel, $user, 'sistema_riavvia', [], 'Riavvio del server richiesto dalla pagina');
+        }));
+
         $r->add('GET', '/api/v1/backup/richiesta/{id}', $moduleId, static fn (Request $q): Response => self::guarded($kernel, $q, static function (User $user) use ($kernel, $q): Response {
             $bridge = self::bridge($kernel);
             $out = $bridge->takeResponse($q->param('id'), $user->username);
@@ -186,7 +224,9 @@ final class BackupRoutes
     {
         $id = self::bridge($kernel)->enqueue($action, $user->username, $params);
         if ($action !== 'aggiorna' && $action !== 'gdrive_completa') {
-            $kernel->audit()->record($user->username, 'emp-core', 'backup.' . $action, 'backup', 'emp', 0, null, $summary);
+            $system = str_starts_with($action, 'sistema_');
+            $kernel->audit()->record($user->username, 'emp-core', $system ? 'sistema.' . substr($action, 8) : 'backup.' . $action,
+                $system ? 'sistema' : 'backup', $system ? 'ubuntu' : 'emp', 0, null, $summary);
         }
 
         return Response::json(['ok' => true, 'richiesta' => $id], 202);

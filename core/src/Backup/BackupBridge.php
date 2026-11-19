@@ -32,6 +32,10 @@ final class BackupBridge
         'chiave' => [],
         'scarica' => ['nome', 'origine'],
         'ripristina' => ['nome', 'origine'],
+        // Pagina Sistema: aggiornamenti dei pacchetti di Ubuntu.
+        'sistema_verifica' => [],
+        'sistema_aggiorna' => [],
+        'sistema_riavvia' => [],
     ];
 
     public function __construct(private readonly string $dir)

@@ -257,6 +257,31 @@ final class Worker
             case 'scarica':
                 return $this->prepareDownload($id, $user, $r);
 
+            // ---- pagina Sistema: aggiornamenti dei pacchetti di Ubuntu
+            case 'sistema_verifica':
+                $this->startJob($id, $action, $user, 'Verifica degli aggiornamenti di Ubuntu');
+                $this->expectOk($this->runJob(['sistema', 'verifica']), 'Verifica non riuscita (Internet raggiungibile?)');
+                $s = $this->systemState();
+
+                return ['messaggio' => $s['disponibili'] === 0
+                    ? 'Nessun aggiornamento disponibile: Ubuntu è aggiornato.'
+                    : sprintf('Aggiornamenti disponibili: %d (di sicurezza: %d).', $s['disponibili'], $s['sicurezza'])];
+
+            case 'sistema_aggiorna':
+                $this->startJob($id, $action, $user, 'Aggiornamenti di Ubuntu');
+                $this->expectOk($this->runJob(['sistema', 'aggiorna']), 'Aggiornamenti non installati (vedere il dettaglio)');
+                $s = $this->systemState();
+
+                return ['messaggio' => $s['riavvio']
+                    ? 'Aggiornamenti installati. Serve un riavvio del server per completarli.'
+                    : 'Aggiornamenti installati. EMP risponde.'];
+
+            case 'sistema_riavvia':
+                [$rc, $out] = $this->runQuiet(['sistema', 'riavvia']);
+                $this->expectOk($rc, 'Riavvio non programmato', $out);
+
+                return ['messaggio' => 'Il server si riavvia tra 1 minuto. La pagina torna disponibile dopo l\'avvio (di solito 1–2 minuti).'];
+
             case 'ripristina':
                 $origin = $this->field($r, 'origine', '/^(locale|remoto)$/', 'Origine non valida');
                 $name = $this->backupName($r);
@@ -580,6 +605,7 @@ final class Worker
         }
         $this->writeJson($this->web . '/stato.json', [
             'formato' => VERSION_FORMAT,
+            'sistema' => $this->systemState(),
             'aggiornato' => date(DATE_ATOM),
             'disponibile' => $rc === 0,
             'impostazioni' => $settings,
@@ -587,6 +613,40 @@ final class Worker
             'locali' => $local,
             'remoti' => $remote,
         ], 0640, true);
+    }
+
+    /**
+     * Stato degli aggiornamenti di Ubuntu (da "emp-server sistema stato --tsv").
+     *
+     * @return array{ubuntu: string, kernel: string, verificato: ?string, disponibili: int, sicurezza: int,
+     *               riavvio: bool, riavvio_per: string, automatici: bool, pacchetti: list<array<string, mixed>>}
+     */
+    private function systemState(): array
+    {
+        $s = ['ubuntu' => '', 'kernel' => '', 'verificato' => null, 'disponibili' => 0, 'sicurezza' => 0,
+            'riavvio' => false, 'riavvio_per' => '', 'automatici' => false, 'pacchetti' => []];
+        [$rc, $out] = $this->runQuiet(['sistema', 'stato', '--tsv']);
+        foreach ($rc === 0 ? explode("\n", $out) : [] as $line) {
+            $f = explode("\t", $line);
+            $v = mb_substr($f[1] ?? '', 0, 300);
+            match ($f[0]) {
+                'ubuntu' => $s['ubuntu'] = $v,
+                'kernel' => $s['kernel'] = $v,
+                'verificato' => $s['verificato'] = ctype_digit($v) && $v !== '0' ? date(DATE_ATOM, (int) $v) : null,
+                'disponibili' => $s['disponibili'] = (int) $v,
+                'sicurezza' => $s['sicurezza'] = (int) $v,
+                'riavvio' => $s['riavvio'] = $v === '1',
+                'riavvio_per' => $s['riavvio_per'] = $v,
+                'automatici' => $s['automatici'] = $v === '1',
+                'pacchetto' => count($f) === 5 && count($s['pacchetti']) < 500
+                    ? $s['pacchetti'][] = ['nome' => mb_substr($f[1], 0, 100), 'installata' => mb_substr($f[2], 0, 100),
+                        'nuova' => mb_substr($f[3], 0, 100), 'sicurezza' => $f[4] === '1']
+                    : null,
+                default => null,
+            };
+        }
+
+        return $s;
     }
 
     // ------------------------------------------------------------------ operazione in corso

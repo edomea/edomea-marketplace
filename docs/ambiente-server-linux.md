@@ -89,22 +89,22 @@ Per copiarlo sulla VM ci sono due modi.
 
 **Dal PC Windows** (PowerShell, nella cartella dove si trova il file). `scp` è già incluso in Windows 11:
 ```
-scp emp-server-0.6.0-alpha.8.tar.gz utente@IP-DEL-SERVER:
+scp emp-server-0.6.0-alpha.9.tar.gz utente@IP-DEL-SERVER:
 ```
 
 **Direttamente sulla VM**, se ha accesso a Internet:
 ```
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.8/emp-server-0.6.0-alpha.8.tar.gz
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.8/emp-server-0.6.0-alpha.8.tar.gz.sha256
-sha256sum -c emp-server-0.6.0-alpha.8.tar.gz.sha256
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.9/emp-server-0.6.0-alpha.9.tar.gz
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.9/emp-server-0.6.0-alpha.9.tar.gz.sha256
+sha256sum -c emp-server-0.6.0-alpha.9.tar.gz.sha256
 ```
 
 ### 2.2 Eseguire l'installazione
 
 Sulla VM, dalla console o via SSH (`ssh utente@IP-DEL-SERVER`):
 ```
-tar -xzf emp-server-0.6.0-alpha.8.tar.gz
-cd emp-server-0.6.0-alpha.8
+tar -xzf emp-server-0.6.0-alpha.9.tar.gz
+cd emp-server-0.6.0-alpha.9
 sudo ./installa.sh
 ```
 
@@ -228,6 +228,7 @@ Sul Server, dalla console o via SSH:
 | `sudo emp-server ripristina FILE` / `--remoto NOME` | Rimette EMP com'era nel backup, sulla stessa macchina o su una nuova |
 | `sudo emp-server accesso-scp NOME` | L'utente NOME scarica i backup e carica i plugin via scp (`--togli` per revocare) |
 | `sudo emp-server elimina-vecchio-utente` | Elimina l'account personale `emp`, se Ubuntu è stato installato con quel nome (§ 5.x) |
+| `sudo emp-server sistema stato\|verifica\|aggiorna\|riavvia` | Aggiornamenti dei pacchetti di Ubuntu (backup di EMP prima dell'installazione); anche dalla pagina **Sistema** |
 | `sudo emp-server moduli` | Core e plugin installati |
 | `sudo emp-server azzera --nome NOME` | Total reset di un clone del master per un nuovo cliente (vedi sotto) |
 | `sudo emp-server collega-github` | Collega il Server a GitHub per gli aggiornamenti |
@@ -243,7 +244,17 @@ L'aggiornamento:
 
 Le versioni di EMP non vengono mai riutilizzate.
 
-Per aggiornare Ubuntu: `sudo apt update && sudo apt upgrade`. Gli aggiornamenti di sicurezza sono già automatici.
+### Aggiornare Ubuntu
+
+Gli aggiornamenti di sicurezza si installano da soli ogni notte (`unattended-upgrades`). Per tutti gli altri aggiornamenti dei pacchetti di Ubuntu, come Nginx, PHP, MariaDB, kernel e sistema, la strada più breve è la pagina **Sistema** di `/techadmin` (`https://IP-DEL-SERVER/techadmin/sistema.html`):
+
+1. **Verifica aggiornamenti**: elenco dei pacchetti da aggiornare, con quelli di sicurezza segnati.
+2. **Installa gli aggiornamenti** (con la password del Tecnico): EMP fa prima un **backup completo** (`…-prima-di-aggiornamenti-ubuntu`), poi installa. Se il backup non riesce, non installa nulla. Alla fine controlla che EMP risponda.
+3. Se compare **Riavvio necessario** (tipicamente un kernel nuovo), usa **Riavvia il server** (password e `RIAVVIA`): il riavvio parte dopo 1 minuto ed EMP torna disponibile da solo.
+
+Le stesse operazioni dalla console sono `sudo emp-server sistema stato`, `… verifica`, `… aggiorna` e `… riavvia`.
+
+Si resta sempre nella stessa versione di Ubuntu: il passaggio a una versione nuova (es. 24.04 → 26.04) non si fa da qui. Durante l'installazione EMP può non rispondere per qualche secondo, mentre si riavviano i servizi aggiornati: meglio a negozio chiuso.
 
 ### Utente di EMP e accesso scp
 
@@ -309,7 +320,7 @@ Poi apri in Chrome il link `http://127.0.0.1:53682/…` che compare e accedi con
 **Ripristino sulla stessa macchina**, per esempio dopo un aggiornamento andato male:
 ```
 sudo emp-server backup-elenco
-sudo emp-server ripristina /var/lib/emp/backup/emp-backup-…-prima-di-0.6.0-alpha.8.tar
+sudo emp-server ripristina /var/lib/emp/backup/emp-backup-…-prima-di-0.6.0-alpha.9.tar
 ```
 Chiede di scrivere `RIPRISTINA`. Prima di sostituire i dati salva lo stato attuale (backup `…-prima-del-ripristino`). Se il backup è di un'altra versione, reinstalla quella versione dal pacchetto contenuto nel backup.
 

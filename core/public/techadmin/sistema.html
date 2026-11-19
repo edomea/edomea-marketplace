@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
+<title>Sistema — EMP</title>
+<link rel="stylesheet" href="/assets/stile.css">
+<script defer src="/assets/comune.js"></script>
+<script defer src="sistema.js"></script>
+</head>
+<body>
+<header class="emp-header">
+  <strong>EMP — Sistema</strong>
+  <span id="user-badge"></span>
+</header>
+<main>
+  <p><a href="index.html">← Amministratore Tecnico</a></p>
+  <p class="intro">
+    Aggiornamenti dei pacchetti di <strong>Ubuntu Server</strong> su cui gira EMP (Nginx, PHP, MariaDB, sistema).
+    Restano nella stessa versione di Ubuntu: il passaggio a una versione nuova non si fa da qui.
+    Prima di installare, EMP fa da solo un backup completo.
+  </p>
+  <p class="note">Funzione riservata all'Amministratore Tecnico, disponibile solo con l'indirizzo https://.
+    Durante l'installazione EMP può non rispondere per qualche secondo: meglio a negozio chiuso.</p>
+
+  <div id="non-disponibile" class="box err" hidden></div>
+
+  <div id="contenuto" hidden>
+    <section class="box">
+      <h3>Stato</h3>
+      <table class="dettagli">
+        <tbody>
+          <tr><th>Sistema</th><td id="ubuntu">—</td></tr>
+          <tr><th>Kernel</th><td id="kernel">—</td></tr>
+          <tr><th>Ultima verifica</th><td id="verificato">—</td></tr>
+          <tr><th>Aggiornamenti disponibili</th><td id="disponibili">—</td></tr>
+          <tr><th>Riavvio necessario</th><td id="riavvio">—</td></tr>
+          <tr><th>Sicurezza automatica</th><td id="automatici">—</td></tr>
+        </tbody>
+      </table>
+      <p>
+        <button type="button" id="verifica">Verifica aggiornamenti</button>
+        <button type="button" id="installa" class="conferma" hidden>Installa gli aggiornamenti</button>
+        <button type="button" id="riavvia" class="secondario" hidden>Riavvia il server</button>
+      </p>
+      <div id="conferma" hidden></div>
+      <div id="lavoro" hidden>
+        <p><strong id="lavoro-titolo"></strong> <span id="lavoro-stato" class="stato"></span></p>
+        <pre id="lavoro-righe" class="registro"></pre>
+      </div>
+    </section>
+
+    <section class="box" id="pacchetti-box" hidden>
+      <h3>Pacchetti da aggiornare</h3>
+      <table id="pacchetti">
+        <thead><tr><th>Pacchetto</th><th>Installata</th><th>Nuova</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+  </div>
+</main>
+</body>
+</html>

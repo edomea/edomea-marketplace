@@ -14,6 +14,7 @@
 #   sudo emp-server ripristina FILE|--remoto NOME  rimette EMP com'era nel backup (stessa o nuova macchina)
 #   sudo emp-server accesso-scp NOME [--togli]     backup scaricabili e plugin caricabili via scp per NOME
 #   sudo emp-server elimina-vecchio-utente         elimina l'account personale "emp" (EMP usa un utente di sistema)
+#   sudo emp-server sistema verifica|aggiorna|riavvia  aggiornamenti dei pacchetti di Ubuntu (con backup prima)
 #   sudo emp-server moduli                         moduli installati (Core e plugin)
 #   sudo emp-server azzera --nome NOME             total reset di un clone del master (dati, identità, nome)
 #   sudo emp-server collega-github                 collega questo Server a GitHub (token da GitHub)
@@ -244,6 +245,102 @@ cmd_recupero_tecnico() {
     require_root recupero-tecnico
     [[ -n ${1:-} ]] || die "uso: sudo emp-server recupero-tecnico NOME_UTENTE_DEL_TECNICO"
     core_cli recupero-tecnico "--tecnico=$1"
+}
+
+# ---------------------------------------------------------------- aggiornamenti di Ubuntu
+#
+# Verifica e installazione degli aggiornamenti dei pacchetti di Ubuntu (stessa versione di
+# Ubuntu: mai il passaggio a una versione nuova, es. 24.04 → 26.04). Gli aggiornamenti di
+# sicurezza restano installati anche ogni notte da unattended-upgrades.
+# Usati anche dalla pagina Sistema di /techadmin (servizio emp-backup-web).
+
+readonly SYSTEM_DIR=$EMP_DATA/sistema
+readonly SYSTEM_CACHE=$SYSTEM_DIR/aggiornamenti.tsv
+
+apt_env() { env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a NEEDRESTART_SUSPEND=1 "$@"; }
+
+system_check() {
+    install -d -m 0755 -o root -g root "$SYSTEM_DIR"
+    apt_env apt-get -q -o DPkg::Lock::Timeout=600 update 2>&1 | sed 's/^/  /' || die "elenco dei pacchetti non aggiornato (Internet?)"
+    local tmp
+    tmp=$(mktemp "$SYSTEM_DIR/.aggiornamenti-XXXXXX")
+    # Simulazione: nessuna modifica. Righe "Inst pacchetto [vecchia] (nuova origine [arch])".
+    LC_ALL=C apt-get -s -o Debug::NoLocking=1 --with-new-pkgs upgrade 2>/dev/null \
+        | sed -nE 's/^Inst ([^ ]+) (\[([^]]+)\] )?\(([^ ]+) ([^)]*)\).*/\1\t\3\t\4\t\5/p' \
+        | awk -F'\t' 'BEGIN{OFS="\t"} {print $1, ($2==""?"-":$2), $3, ($4 ~ /-security/ ? 1 : 0)}' > "$tmp"
+    chmod 0644 "$tmp"
+    mv "$tmp" "$SYSTEM_CACHE"
+}
+
+system_status_tsv() {
+    local pretty total=0 security=0 checked=0 reboot=0 auto=0
+    # shellcheck disable=SC1091
+    pretty=$(. /etc/os-release && echo "$PRETTY_NAME")
+    if [[ -f $SYSTEM_CACHE ]]; then
+        total=$(wc -l < "$SYSTEM_CACHE")
+        security=$(awk -F'\t' '$4==1' "$SYSTEM_CACHE" | wc -l)
+        checked=$(stat -c %Y "$SYSTEM_CACHE")
+    fi
+    [[ -f /var/run/reboot-required ]] && reboot=1
+    systemctl is-enabled --quiet unattended-upgrades 2>/dev/null && auto=1
+    printf 'ubuntu\t%s\nkernel\t%s\nverificato\t%s\ndisponibili\t%s\nsicurezza\t%s\nriavvio\t%s\nautomatici\t%s\n' \
+        "$pretty" "$(uname -r)" "$checked" "$total" "$security" "$reboot" "$auto"
+    if [[ $reboot == 1 && -f /var/run/reboot-required.pkgs ]]; then
+        printf 'riavvio_per\t%s\n' "$(sort -u /var/run/reboot-required.pkgs | tr '\n' ' ' | sed 's/ $//')"
+    fi
+    if [[ -f $SYSTEM_CACHE ]]; then sed 's/^/pacchetto\t/' "$SYSTEM_CACHE"; fi
+}
+
+cmd_sistema() {
+    require_root sistema
+    local action=${1:-stato}
+    shift || true
+    case $action in
+        verifica)
+            info "Verifica degli aggiornamenti di Ubuntu"
+            system_check
+            local n s
+            n=$(wc -l < "$SYSTEM_CACHE"); s=$(awk -F'\t' '$4==1' "$SYSTEM_CACHE" | wc -l)
+            info "Aggiornamenti disponibili: $n (di sicurezza: $s)"
+            [[ $n -gt 0 ]] && awk -F'\t' '{printf "  %-40s %s → %s%s\n", $1, $2, $3, ($4==1 ? "  [sicurezza]" : "")}' "$SYSTEM_CACHE"
+            return 0 ;;
+        aggiorna)
+            info "Backup di EMP prima degli aggiornamenti di Ubuntu"
+            local rc=0
+            cmd_backup --etichetta prima-di-aggiornamenti-ubuntu || rc=$?
+            ((rc == 0 || rc == 3)) || die "backup non riuscito: aggiornamenti di Ubuntu NON installati"
+            info "Installazione degli aggiornamenti di Ubuntu (i servizi interessati si riavviano da soli)"
+            # NEEDRESTART_SUSPEND (in apt_env): needrestart non riavvia servizi a metà installazione,
+            # nemmeno quello della pagina Sistema che la sta eseguendo; i pacchetti riavviano i propri.
+            if ! apt_env apt-get -q -y -o DPkg::Lock::Timeout=900 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+                --with-new-pkgs upgrade 2>&1 | sed 's/^/  /'; then
+                die "installazione degli aggiornamenti non riuscita (vedere il dettaglio sopra)"
+            fi
+            system_check >/dev/null
+            health_ok || die "dopo gli aggiornamenti EMP non risponde: controllare $EMP_LOGS (backup: prima-di-aggiornamenti-ubuntu)"
+            info "Aggiornamenti installati. EMP risponde."
+            if [[ -f /var/run/reboot-required ]]; then
+                info "Serve un RIAVVIO del server per completarli (es. nuovo kernel): sudo emp-server sistema riavvia"
+            fi ;;
+        riavvia)
+            info "Il server si riavvia tra 1 minuto. EMP torna disponibile da solo dopo l'avvio."
+            shutdown -r +1 "Riavvio richiesto per gli aggiornamenti di Ubuntu (EMP)" >/dev/null 2>&1 || die "riavvio non programmato" ;;
+        stato)
+            if [[ ${1:-} == --tsv ]]; then system_status_tsv; return 0; fi
+            local key value
+            while IFS=$'\t' read -r key value _; do
+                case $key in
+                    ubuntu) echo "Sistema: $value" ;;
+                    kernel) echo "Kernel: $value" ;;
+                    verificato) if [[ $value == 0 ]]; then echo "Ultima verifica: mai (sudo emp-server sistema verifica)"; else echo "Ultima verifica: $(date -d "@$value" '+%d/%m/%Y %H:%M')"; fi ;;
+                    disponibili) echo "Aggiornamenti disponibili: $value" ;;
+                    sicurezza) echo "  di sicurezza: $value" ;;
+                    riavvio) if [[ $value == 1 ]]; then echo "Riavvio necessario: sì (sudo emp-server sistema riavvia)"; else echo "Riavvio necessario: no"; fi ;;
+                    automatici) if [[ $value == 1 ]]; then echo "Aggiornamenti di sicurezza automatici: attivi (ogni notte)"; else echo "Aggiornamenti di sicurezza automatici: NON attivi"; fi ;;
+                esac
+            done < <(system_status_tsv) ;;
+        *) die "uso: sudo emp-server sistema stato | verifica | aggiorna | riavvia" ;;
+    esac
 }
 
 # ---------------------------------------------------------------- utenti, accesso scp, arrivi
@@ -1023,7 +1120,7 @@ cmd_collega_github() {
 }
 
 usage() {
-    sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -1043,6 +1140,7 @@ main() {
         ripristina) cmd_ripristina "$@" ;;
         accesso-scp) cmd_accesso_scp "$@" ;;
         elimina-vecchio-utente) cmd_elimina_vecchio_utente "$@" ;;
+        sistema) cmd_sistema "$@" ;;
         moduli) cmd_moduli ;;
         azzera) cmd_azzera "$@" ;;
         collega-github) cmd_collega_github "$@" ;;

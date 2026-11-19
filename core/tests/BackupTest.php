@@ -199,6 +199,43 @@ final class BackupTest extends TestCase
         self::assertFalse(str_contains(json_encode($audit) ?: '', self::PWD));
     }
 
+    public function testSystemUpdatesRoutes(): void
+    {
+        $kernel = new Kernel($this->modules, $this->installer, new Clock(), serverVersion: '0.6.0-alpha.9', backupWebDir: $this->web);
+        $kernel->access()->setupTecnico('tecnico', 'Mario Tecnico', self::PWD);
+        $h = ['host' => 'localhost', 'x-emp-richiesta' => '1'];
+        $login = $kernel->handle(new Request('POST', '/api/v1/accesso/login', $h, '127.0.0.1', (string) json_encode(['username' => 'tecnico', 'password' => self::PWD])));
+        preg_match('/emp_sessione=([0-9a-f]{64})/', $login->headers['Set-Cookie'], $m);
+        $auth = $h + ['cookie' => 'emp_sessione=' . $m[1]];
+        $post = static fn (string $path, array $body = []): Response => $kernel->handle(new Request('POST', '/api/v1/sistema/' . $path, $auth, '127.0.0.1', (string) json_encode($body)));
+
+        // Senza sessione: 401. Stato scritto dal servizio di EMP Server.
+        self::assertSame(401, $kernel->handle(new Request('GET', '/api/v1/sistema', $h, '127.0.0.1'))->status);
+        file_put_contents($this->web . '/stato.json', json_encode(['sistema' => ['ubuntu' => 'Ubuntu 26.04 LTS', 'disponibili' => 3, 'sicurezza' => 1, 'riavvio' => false, 'pacchetti' => []]]));
+        file_put_contents($this->web . '/lavoro.json', json_encode(['azione' => 'backup', 'titolo' => 'Backup di EMP']));
+        $state = json_decode($kernel->handle(new Request('GET', '/api/v1/sistema', $auth, '127.0.0.1'))->body, true);
+        self::assertSame(['Ubuntu 26.04 LTS', 3], [$state['sistema']['ubuntu'], $state['sistema']['disponibili']]);
+        self::assertNull($state['lavoro'], 'un backup in corso non è un lavoro della pagina Sistema');
+
+        // Verifica: senza password. Installazione e riavvio: con password (e RIAVVIA scritto).
+        $check = $post('verifica');
+        self::assertSame(202, $check->status, $check->body);
+        self::assertSame('sistema_verifica', $this->request(json_decode($check->body, true)['richiesta'] . '.req')['azione']);
+        self::assertSame(403, $post('aggiorna', ['password' => 'sbagliata'])->status);
+        $upgrade = $post('aggiorna', ['password' => self::PWD]);
+        self::assertSame(202, $upgrade->status, $upgrade->body);
+        self::assertSame('sistema_aggiorna', $this->request(json_decode($upgrade->body, true)['richiesta'] . '.req')['azione']);
+        self::assertSame(409, $post('riavvia', ['password' => self::PWD])->status);
+        self::assertSame(403, $post('riavvia', ['password' => 'x', 'conferma' => 'RIAVVIA'])->status);
+        self::assertSame(202, $post('riavvia', ['password' => self::PWD, 'conferma' => 'RIAVVIA'])->status);
+        self::assertCount(3, $this->queued());
+
+        $actions = $this->pdo->query("SELECT action FROM emp_core_audit WHERE action LIKE 'sistema.%'")->fetchAll(\PDO::FETCH_COLUMN);
+        foreach (['sistema.verifica', 'sistema.aggiorna', 'sistema.riavvia'] as $a) {
+            self::assertContains($a, $actions);
+        }
+    }
+
     public function testUnavailableOutsideEmpServer(): void
     {
         $kernel = new Kernel($this->modules, $this->installer, new Clock());

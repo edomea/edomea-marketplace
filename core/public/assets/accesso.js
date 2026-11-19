@@ -47,6 +47,7 @@ async function load() {
   }
   if ($("link-plugin")) $("link-plugin").hidden = current.ruolo !== "tecnico";
   if ($("link-backup")) $("link-backup").hidden = current.ruolo !== "tecnico";
+  if ($("link-sistema")) $("link-sistema").hidden = current.ruolo !== "tecnico";
   show(["links-box"]);
   await loadUsers();
 }

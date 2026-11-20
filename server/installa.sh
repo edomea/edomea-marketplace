@@ -91,8 +91,11 @@ install_packages() {
     PHP_VERSION=$(php_version)
     readonly PHP_VERSION
     php -r "exit(version_compare(PHP_VERSION, '${MIN_PHP}', '>=') ? 0 : 1);" || die "serve PHP ${MIN_PHP} o successivo (trovato ${PHP_VERSION})"
+    # Elenco letto una volta: "php -m | grep -q" con pipefail fallisce a caso (SIGPIPE quando grep esce subito).
+    local modules
+    modules=$(php -m)
     for ext in pdo_mysql mbstring zip; do
-        php -m | grep -qix "$ext" || die "estensione PHP mancante: $ext"
+        grep -qix "$ext" <<<"$modules" || die "estensione PHP mancante: $ext"
     done
     info "Nginx $(nginx -v 2>&1 | cut -d/ -f2), PHP ${PHP_VERSION}, $(mariadb --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+-MariaDB' | head -1)"
 

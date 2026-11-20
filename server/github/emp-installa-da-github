@@ -133,8 +133,10 @@ nome=${archivio%.tar.gz}
 [[ -f "$LAVORO/a/$archivio.sha256" ]] || die "manca $archivio.sha256"
 ( cd "$LAVORO/a" && sha256sum --check --strict --quiet "$archivio.sha256" ) || die "impronta del pacchetto non corrispondente"
 # Ogni voce deve stare dentro la cartella del pacchetto: niente percorsi assoluti o "..".
-if tar -tzf "$LAVORO/a/$archivio" | grep -Ev "^$nome(/|$)" | grep -q . \
-   || tar -tzf "$LAVORO/a/$archivio" | grep -qE '(^|/)\.\.(/|$)'; then
+# Elenco letto per intero (niente "| grep -q": con pipefail il SIGPIPE renderebbe falso il controllo).
+contenuto=$(tar -tzf "$LAVORO/a/$archivio")
+if grep -Ev "^$nome(/|$)" <<<"$contenuto" | grep . >/dev/null \
+   || grep -E '(^|/)\.\.(/|$)' <<<"$contenuto" >/dev/null; then
     die "il pacchetto contiene percorsi non ammessi"
 fi
 mkdir "$LAVORO/p"

@@ -12,7 +12,8 @@ const EMP = {
     document.body.appendChild(footer);
     try {
       const s = await EMP.api("salute");
-      footer.textContent = (s.server ? "EMP Server " + s.server + " · " : "") + "Core " + s.core;
+      footer.textContent = (s.server ? "EMP Server " + s.server + " · " : "") + "Core " + s.core
+        + (s.avvio_sicuro ? " · AVVIO SICURO: plugin fermi (sudo emp-server avvio-sicuro --fine)" : "");
     } catch (_) {
       footer.textContent = "Versione non disponibile";
     }

@@ -19,7 +19,8 @@ use Emp\Core\Support\Clock;
  *    'local_catalog_dir' => '/…/catalogo-locale',  // facoltativo: pacchetti caricati a mano o importati da GitHub
  *    'server_version' => '0.6.0-alpha.7',         // facoltativo: versione di EMP Server, mostrata nelle pagine
  *    'arrivals_dir' => '/…/arrivi/plugin',        // facoltativo: plugin caricati via scp
- *    'backup_web_dir' => '/var/lib/emp/backup-web']  // facoltativo: scambio con il servizio dei backup di EMP Server
+ *    'backup_web_dir' => '/var/lib/emp/backup-web',  // facoltativo: scambio con il servizio dei backup di EMP Server
+ *    'boot_control_file' => '/etc/emp/avvio.conf']    // facoltativo: avvio sicuro e plugin disattivati dalla console
  */
 final class Config
 {
@@ -79,6 +80,7 @@ final class Config
         $server = $this->values['server_version'] ?? null;
         $arrivals = $this->values['arrivals_dir'] ?? null;
         $backup = $this->values['backup_web_dir'] ?? null;
+        $boot = $this->values['boot_control_file'] ?? null;
 
         return new Kernel(
             $this->modulesDir(),
@@ -90,6 +92,7 @@ final class Config
             is_string($server) && preg_match('/^[0-9A-Za-z.+~-]{1,40}$/', $server) ? $server : null,
             is_string($arrivals) && $arrivals !== '' ? $arrivals : null,
             is_string($backup) && $backup !== '' ? $backup : null,
+            is_string($boot) && $boot !== '' ? $boot : null,
         );
     }
 }

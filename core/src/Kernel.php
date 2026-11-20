@@ -10,6 +10,7 @@ use Emp\Core\Http\CsrfGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
 use Emp\Core\Http\Router;
+use Emp\Core\Module\BootControl;
 use Emp\Core\Module\Installer;
 use Emp\Core\Module\Manifest;
 use Emp\Core\Module\ModuleInterface;
@@ -38,6 +39,9 @@ final class Kernel
     private array $booted = [];
     private readonly Psr4Autoloader $autoloader;
     private ?AccessService $access = null;
+    private ?BootControl $bootControl = null;
+    /** @var array<string, string> moduli installati ma non avviati: id => motivo */
+    private array $skipped = [];
 
     public function __construct(
         private readonly string $modulesDir,
@@ -52,6 +56,8 @@ final class Kernel
         private readonly ?string $arrivalsDir = null,
         /** Cartella di scambio con il servizio dei backup di EMP Server (null fuori da EMP Server). */
         private readonly ?string $backupWebDir = null,
+        /** File dell'avvio dei plugin deciso dalla console (avvio sicuro, plugin disattivati). */
+        private readonly ?string $bootControlFile = null,
     ) {
         $this->router = new Router();
         $this->autoloader = new Psr4Autoloader();
@@ -68,21 +74,36 @@ final class Kernel
             throw new ResolutionException('Il Core non è installato: completare il primo setup');
         }
 
-        $present = [];
+        $onDisk = [];
         foreach ($available as $m) {
             if (isset($installed[$m->id])) {
-                if ((string) $m->version !== $installed[$m->id]) {
-                    throw new ResolutionException(sprintf(
-                        '"%s": file alla versione %s, database alla %s. Completare l\'aggiornamento dal Control Center.',
-                        $m->id,
-                        $m->version,
-                        $installed[$m->id],
-                    ));
-                }
-                $present[] = $m;
+                $onDisk[$m->id] = $m;
             }
         }
-        $missing = array_diff(array_keys($installed), array_map(static fn (Manifest $m): string => $m->id, $present));
+        // Plugin fermati dalla console (avvio sicuro, plugin disattivati) e chi dipende da loro.
+        $this->skipped = $this->bootControl()->skipped(array_values($onDisk));
+        foreach (array_keys($installed) as $id) {
+            if (!isset($onDisk[$id]) && $id !== Manifest::CORE_ID && ($this->bootControl()->safeMode || in_array($id, $this->bootControl()->disabled, true))) {
+                $this->skipped[$id] = $this->bootControl()->safeMode ? BootControl::SAFE_MODE : BootControl::DISABLED;
+            }
+        }
+
+        $present = [];
+        foreach ($onDisk as $m) {
+            if (isset($this->skipped[$m->id])) {
+                continue;
+            }
+            if ((string) $m->version !== $installed[$m->id]) {
+                throw new ResolutionException(sprintf(
+                    '"%s": file alla versione %s, database alla %s. Completare l\'aggiornamento dal Control Center.',
+                    $m->id,
+                    $m->version,
+                    $installed[$m->id],
+                ));
+            }
+            $present[] = $m;
+        }
+        $missing = array_diff(array_keys($installed), array_keys($onDisk), array_keys($this->skipped));
         if ($missing !== []) {
             throw new ResolutionException('Moduli installati ma assenti dai file: ' . implode(', ', $missing));
         }
@@ -99,6 +120,18 @@ final class Kernel
             $module->register($this, $m);
             $this->booted[] = $m;
         }
+    }
+
+    /** Avvio dei plugin deciso dalla console del Server (avvio sicuro, plugin disattivati). */
+    public function bootControl(): BootControl
+    {
+        return $this->bootControl ??= BootControl::fromFile($this->bootControlFile);
+    }
+
+    /** @return array<string, string> moduli installati ma non avviati (id => motivo), dopo boot() */
+    public function skipped(): array
+    {
+        return $this->skipped;
     }
 
     /** @return list<Manifest> moduli avviati, in ordine */
@@ -122,6 +155,8 @@ final class Kernel
             $this->installer,
             PHP_VERSION,
             $this->localCatalogDir !== null ? new LocalCatalog($this->localCatalogDir) : null,
+            $this->skipped,
+            $this->bootControl()->safeMode,
         );
     }
 

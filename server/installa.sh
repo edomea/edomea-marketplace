@@ -161,6 +161,7 @@ return [
     'server_version' => '${EMP_VERSION}',
     'arrivals_dir' => '${EMP_DATA}/arrivi/plugin',
     'backup_web_dir' => '${EMP_DATA}/backup-web',
+    'boot_control_file' => '${EMP_CONF_DIR}/avvio.conf',
 ];
 EOF
     install -m 0640 -o root -g "$EMP_USER" "$tmp" "$EMP_CONFIG"

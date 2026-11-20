@@ -159,6 +159,24 @@ jobs:
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | grep -q '"stato":"aggiornabile"'
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/emp-esempio/installa" | grep -q '"ok":true'
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | grep -q '"versione_installata":"0.1.1"'
+          # Recupero da un plugin che blocca EMP: plugin-disattiva / plugin-riattiva / avvio-sicuro dalla console.
+          sudo emp-server plugin-disattiva emp-esempio
+          test "$(code --cacert "$CA" "$B/api/v1/esempio")" = 404
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | jq -e '.plugin[] | select(.id == "emp-esempio") | .fermo | test("console")' >/dev/null
+          sudo emp-server moduli | grep -q 'emp-esempio: disattivato'
+          if sudo emp-server plugin-disattiva emp-core; then exit 1; fi
+          if sudo emp-server plugin-disattiva emp-inesistente; then exit 1; fi
+          sudo emp-server plugin-riattiva emp-esempio
+          curl -fsS --cacert "$CA" "$B/api/v1/esempio" | grep -q '"modulo":"emp-esempio"'
+          sudo emp-server avvio-sicuro
+          curl -fsS --cacert "$CA" "$B/api/v1/salute" | jq -e '.avvio_sicuro == true' >/dev/null
+          test "$(code --cacert "$CA" "$B/api/v1/esempio")" = 404
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | jq -e '.avvio_sicuro == true' >/dev/null
+          sudo emp-server stato | grep -q 'AVVIO SICURO attivo'
+          sudo emp-server avvio-sicuro --fine
+          test ! -e /etc/emp/avvio.conf
+          curl -fsS --cacert "$CA" "$B/api/v1/salute" | jq -e '.avvio_sicuro == false' >/dev/null
+          curl -fsS --cacert "$CA" "$B/api/v1/esempio" | grep -q '"modulo":"emp-esempio"'
           # Sorgente GitHub: disattivata di predefinito.
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin/github" | grep -q '"attiva":false'
           test "$(code -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin/github/release")" = 409
@@ -214,6 +232,8 @@ jobs:
           curl -fsS --cacert "$CA" -o /dev/null "$B/techadmin/backup.html"
           attendi "$(richiesta aggiorna)" > /dev/null
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/backup" | tee "$RUNNER_TEMP/backup-stato.json" | jq -e '.disponibile and .stato.destinazione.collegata and .stato.destinazione.raggiungibile' >/dev/null
+          # Tipo e data del collegamento (l'account Google c'è solo con Google Drive).
+          jq -e '.stato.destinazione.tipo == "locale" and (.stato.destinazione.dal | type) == "string" and .stato.destinazione.account == null' "$RUNNER_TEMP/backup-stato.json" >/dev/null
           PRIMA=$(jq '.stato.locali | length' "$RUNNER_TEMP/backup-stato.json")
           attendi "$(richiesta esegui)" 300 | tee /dev/stderr | grep -q 'Backup eseguito'
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/backup" | jq -e ".stato.locali | length == $((PRIMA + 1))" >/dev/null

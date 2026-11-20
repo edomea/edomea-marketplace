@@ -6,6 +6,7 @@ namespace Emp\Core\Tests;
 
 use Emp\Core\Http\Request;
 use Emp\Core\Kernel;
+use Emp\Core\Module\BootControl;
 use Emp\Core\Module\Installer;
 use Emp\Core\Module\Registry;
 use Emp\Core\Module\ResolutionException;
@@ -41,8 +42,8 @@ final class InstallerKernelTest extends TestCase
     public function testInstallCoreThenPluginAndBoot(): void
     {
         $log = $this->installer->install($this->plan(), 'tecnico');
-        self::assertSame(['Installato emp-core 0.1.8 (2 migrazioni)', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
-        self::assertSame(['emp-core' => '0.1.8', 'emp-esempio' => '0.1.0'], $this->installer->installed());
+        self::assertSame(['Installato emp-core 0.1.9 (2 migrazioni)', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
+        self::assertSame(['emp-core' => '0.1.9', 'emp-esempio' => '0.1.0'], $this->installer->installed());
 
         $tables = $this->pdo->query("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")->fetchAll(\PDO::FETCH_COLUMN);
         self::assertSame([
@@ -60,7 +61,7 @@ final class InstallerKernelTest extends TestCase
         // Versione di EMP Server (dalla configurazione) mostrata nelle pagine.
         $withServer = new Kernel($this->modules, $this->installer, new Clock(), null, null, null, '0.6.0-alpha.5');
         $versions = json_decode($withServer->handle(new Request('GET', '/api/v1/salute'))->body, true);
-        self::assertSame(['0.6.0-alpha.5', '0.1.8'], [$versions['server'], $versions['core']]);
+        self::assertSame(['0.6.0-alpha.5', '0.1.9'], [$versions['server'], $versions['core']]);
         $plugin = $kernel->handle(new Request('GET', '/api/v1/esempio'));
         self::assertSame(['modulo' => 'emp-esempio', 'versione' => '0.1.0'], json_decode($plugin->body, true));
         self::assertSame(404, $kernel->handle(new Request('GET', '/api/v1/inesistente'))->status);
@@ -74,7 +75,7 @@ final class InstallerKernelTest extends TestCase
     {
         $this->installer->install($this->plan(), 'tecnico');
         $log = $this->installer->install($this->plan(), 'tecnico');
-        self::assertSame(['emp-core 0.1.8 già installato', 'emp-esempio 0.1.0 già installato'], $log);
+        self::assertSame(['emp-core 0.1.9 già installato', 'emp-esempio 0.1.0 già installato'], $log);
     }
 
     public function testPluginRefusedWithoutCore(): void
@@ -155,7 +156,7 @@ final class InstallerKernelTest extends TestCase
         }
         $this->installer->uninstall('emp-figlio', $available, 'tecnico');
         $this->installer->uninstall('emp-esempio', $available, 'tecnico');
-        self::assertSame(['emp-core' => '0.1.8'], $this->installer->installed());
+        self::assertSame(['emp-core' => '0.1.9'], $this->installer->installed());
         // I dati restano.
         self::assertSame(1, (int) $this->pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE name = 'emp_esempio_note'")->fetchColumn());
     }
@@ -179,5 +180,78 @@ final class InstallerKernelTest extends TestCase
             ['CREATE TABLE a (x INT)', "INSERT INTO a VALUES (1)"],
             Installer::splitStatements("-- commento\nCREATE TABLE a (x INT);\n\nINSERT INTO a VALUES (1);"),
         );
+    }
+
+    /** Plugin che blocca EMP: fermato dalla console (plugin-disattiva, avvio-sicuro), il Core riparte. */
+    public function testBootControlStopsBrokenPlugin(): void
+    {
+        $broken = <<<'PHP'
+            <?php
+            namespace Emp\Test\EmpRotto;
+            final class Module implements \Emp\Core\Module\ModuleInterface
+            {
+                public function register(\Emp\Core\Kernel $kernel, \Emp\Core\Module\Manifest $manifest): void
+                {
+                    throw new \RuntimeException('plugin rotto');
+                }
+            }
+            PHP;
+        Fixtures::writeModule($this->modules, Fixtures::manifest('emp-rotto'), ['src/Module.php' => $broken]);
+        $child = <<<'PHP'
+            <?php
+            namespace Emp\Test\EmpFiglio;
+            final class Module implements \Emp\Core\Module\ModuleInterface
+            {
+                public function register(\Emp\Core\Kernel $kernel, \Emp\Core\Module\Manifest $manifest): void
+                {
+                }
+            }
+            PHP;
+        Fixtures::writeModule($this->modules, Fixtures::manifest('emp-figlio', [
+            'requires' => ['emp-core' => '>=0.1.0 <0.2.0', 'emp-rotto' => '>=0.1.0'],
+        ]), ['src/Module.php' => $child]);
+        $this->installer->install($this->plan(), 'tecnico');
+
+        $conf = Fixtures::tempDir() . '/avvio.conf';
+        $kernel = fn (): Kernel => new Kernel($this->modules, $this->installer, new Clock(), bootControlFile: $conf);
+        // Senza interventi: il plugin rotto blocca tutto.
+        self::assertSame(503, $kernel()->handle(new Request('GET', '/api/v1/salute'))->status);
+
+        file_put_contents($conf, "# prova\nAVVIO_SICURO=no\nDISATTIVATI=emp-rotto,emp-core,NON VALIDO\n");
+        $k = $kernel();
+        $health = $k->handle(new Request('GET', '/api/v1/salute'));
+        self::assertSame(200, $health->status);
+        self::assertFalse(json_decode($health->body, true)['avvio_sicuro']);
+        self::assertSame(['emp-core', 'emp-esempio'], array_map(static fn ($m) => $m->id, $k->modules()));
+        self::assertSame(['emp-figlio', 'emp-rotto'], array_keys($k->skipped()));
+        self::assertSame(BootControl::DISABLED, $k->skipped()['emp-rotto']);
+        self::assertStringContainsString('emp-rotto', $k->skipped()['emp-figlio']);
+        self::assertSame(200, $k->handle(new Request('GET', '/api/v1/esempio'))->status);
+        $rows = array_column($k->plugins()->overview()['plugin'], 'fermo', 'id');
+        self::assertSame(BootControl::DISABLED, $rows['emp-rotto']);
+        self::assertNull($rows['emp-esempio']);
+
+        // Avvio sicuro: solo il Core.
+        file_put_contents($conf, "AVVIO_SICURO=si\nDISATTIVATI=\n");
+        $k = $kernel();
+        $health = $k->handle(new Request('GET', '/api/v1/salute'));
+        self::assertSame(200, $health->status);
+        self::assertTrue(json_decode($health->body, true)['avvio_sicuro']);
+        self::assertSame(['emp-core'], array_map(static fn ($m) => $m->id, $k->modules()));
+        self::assertSame(404, $k->handle(new Request('GET', '/api/v1/esempio'))->status);
+        self::assertTrue($k->plugins()->overview()['avvio_sicuro']);
+
+        // File tolto (plugin-riattiva / avvio-sicuro --fine): di nuovo tutto attivo, e il plugin rotto blocca.
+        unlink($conf);
+        self::assertSame(503, $kernel()->handle(new Request('GET', '/api/v1/salute'))->status);
+    }
+
+    public function testBootControlParse(): void
+    {
+        $c = BootControl::parse("AVVIO_SICURO=si\nDISATTIVATI= emp-b , emp-a,emp-a,../x\nALTRO=1\n");
+        self::assertTrue($c->safeMode);
+        self::assertSame(['emp-a', 'emp-b'], $c->disabled);
+        self::assertFalse(BootControl::fromFile('/percorso/inesistente')->safeMode);
+        self::assertFalse(BootControl::parse("AVVIO_SICURO=SI\n")->safeMode);
     }
 }

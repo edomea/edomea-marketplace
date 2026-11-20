@@ -89,22 +89,22 @@ Per copiarlo sulla VM ci sono due modi.
 
 **Dal PC Windows** (PowerShell, nella cartella dove si trova il file). `scp` è già incluso in Windows 11:
 ```
-scp emp-server-0.6.0-alpha.9.tar.gz utente@IP-DEL-SERVER:
+scp emp-server-0.6.0-alpha.10.tar.gz utente@IP-DEL-SERVER:
 ```
 
 **Direttamente sulla VM**, se ha accesso a Internet:
 ```
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.9/emp-server-0.6.0-alpha.9.tar.gz
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.9/emp-server-0.6.0-alpha.9.tar.gz.sha256
-sha256sum -c emp-server-0.6.0-alpha.9.tar.gz.sha256
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.10/emp-server-0.6.0-alpha.10.tar.gz
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.10/emp-server-0.6.0-alpha.10.tar.gz.sha256
+sha256sum -c emp-server-0.6.0-alpha.10.tar.gz.sha256
 ```
 
 ### 2.2 Eseguire l'installazione
 
 Sulla VM, dalla console o via SSH (`ssh utente@IP-DEL-SERVER`):
 ```
-tar -xzf emp-server-0.6.0-alpha.9.tar.gz
-cd emp-server-0.6.0-alpha.9
+tar -xzf emp-server-0.6.0-alpha.10.tar.gz
+cd emp-server-0.6.0-alpha.10
 sudo ./installa.sh
 ```
 
@@ -229,7 +229,9 @@ Sul Server, dalla console o via SSH:
 | `sudo emp-server accesso-scp NOME` | L'utente NOME scarica i backup e carica i plugin via scp (`--togli` per revocare) |
 | `sudo emp-server elimina-vecchio-utente` | Elimina l'account personale `emp`, se Ubuntu è stato installato con quel nome (§ 5.x) |
 | `sudo emp-server sistema stato\|verifica\|aggiorna\|riavvia` | Aggiornamenti dei pacchetti di Ubuntu (backup di EMP prima dell'installazione); anche dalla pagina **Sistema** |
-| `sudo emp-server moduli` | Core e plugin installati |
+| `sudo emp-server moduli` | Core e plugin installati, con quelli fermi |
+| `sudo emp-server plugin-disattiva NOME` | Ferma un plugin che blocca EMP: resta installato con i suoi dati (`plugin-riattiva NOME` per riavviarlo) |
+| `sudo emp-server avvio-sicuro` | Si avvia solo il Core, tutti i plugin fermi (`--fine` per tornare al normale) |
 | `sudo emp-server azzera --nome NOME` | Total reset di un clone del master per un nuovo cliente (vedi sotto) |
 | `sudo emp-server collega-github` | Collega il Server a GitHub per gli aggiornamenti |
 
@@ -287,6 +289,12 @@ Tutto si gestisce dalla pagina **Backup** di `/techadmin` (Amministratore Tecnic
 
 **Google Drive dalla pagina, senza SSH:** *Collega* → si apre Google → accedi con l'account dei backup e consenti → il browser finisce su una pagina che non si apre (`http://127.0.0.1:53682/…`): è normale. Copia quell'indirizzo dalla barra e incollalo nella pagina Backup. Alla fine compare la **chiave dei backup**: scaricala in TXT e conservala fuori dalla VM.
 
+**Account Google collegato.** Sotto la destinazione la pagina mostra l'account Google, da quando è collegato e se si usa un client Google proprio. Con **Cambia account / Ricollega** (serve la tua password) si rifà il collegamento a Google **con la stessa chiave dei backup**: con lo stesso account si ritrovano i backup già inviati (es. accesso revocato o scaduto); con un account diverso quelli vecchi restano sull'altro account.
+
+**Client Google proprio (facoltativo).** Nel riquadro *Collega* → Google Drive → *Client Google proprio* si possono indicare Client ID e Client Secret di un client OAuth di tipo **App desktop** di un vostro progetto Google Cloud, con l'API Google Drive attiva. Senza, EMP usa il client predefinito di rclone. EMP vede solo i file creati con lo stesso client: cambiando client, i backup già sul Drive non compaiono più nell'elenco. Dalla console: `sudo emp-server backup-remoto collega gdrive --client-id ID --client-secret-file FILE`.
+
+**Chiave dei backup esistente.** Il browser non riempie più questo campo da solo, e il formato `EMP-BK-…` viene controllato mentre si scrive: una chiave sbagliata è segnalata prima di cliccare *Collega*.
+
 **Dopo un ripristino** EMP torna allo stato del backup, comprese utenze e password di allora: se la pagina chiede di accedere di nuovo, usare la password valida al momento del backup.
 
 Il backup riguarda **tutto EMP e solo EMP**.
@@ -320,7 +328,7 @@ Poi apri in Chrome il link `http://127.0.0.1:53682/…` che compare e accedi con
 **Ripristino sulla stessa macchina**, per esempio dopo un aggiornamento andato male:
 ```
 sudo emp-server backup-elenco
-sudo emp-server ripristina /var/lib/emp/backup/emp-backup-…-prima-di-0.6.0-alpha.9.tar
+sudo emp-server ripristina /var/lib/emp/backup/emp-backup-…-prima-di-0.6.0-alpha.10.tar
 ```
 Chiede di scrivere `RIPRISTINA`. Prima di sostituire i dati salva lo stato attuale (backup `…-prima-del-ripristino`). Se il backup è di un'altra versione, reinstalla quella versione dal pacchetto contenuto nel backup.
 
@@ -373,6 +381,8 @@ Una VM **master** resta sempre aggiornata all'ultima release e in stato di fabbr
 | «Codice di setup non valido o scaduto» | `sudo emp-server codice-setup` genera un codice nuovo; quello precedente non vale più. |
 | «Funzione disponibile solo in HTTPS» | EMP è stato aperto con `http://`: usare `https://`. |
 | Il Core non risponde | `sudo emp-server stato`; registri in `/var/log/nginx/emp-errori.log` e `/var/log/emp/php-errori.log`. |
+| Dopo l'installazione di un plugin le pagine danno «Servizio non disponibile» | Il plugin blocca EMP. `sudo emp-server plugin-disattiva NOME` (oppure, se non si sa quale, `sudo emp-server avvio-sicuro`): il Core riparte subito, il plugin resta installato con i suoi dati. Poi aggiornarlo o disinstallarlo dalla pagina Plugin e riattivarlo (`plugin-riattiva NOME`, `avvio-sicuro --fine`). |
+| L'installazione da GitHub si ferma con `404 Not Found` su `security.ubuntu.com` | Ubuntu ha pubblicato l'elenco di un aggiornamento prima dei file: EMP non è stato toccato. Sul Server `sudo apt update && sudo apt install --only-upgrade PACCHETTO`, poi rilanciare il workflow; se il 404 resta, riprovare dopo un'ora o due. |
 | L'installazione dice che Ubuntu non è collaudata | Usare 26.04 o 24.04 LTS. In alternativa `EMP_CONSENTI_SISTEMA=1`, a proprio rischio. |
 
 ---

@@ -21,6 +21,7 @@ use Emp\Core\Kernel;
  *   POST /api/v1/backup/esegui                 backup completo adesso
  *   POST /api/v1/backup/impostazioni           {ora, notturno, conserva_locali, conserva_remoti}
  *   POST /api/v1/backup/destinazione           {tipo: gdrive|sftp|cartella, password, chiave?, destinazione?, password_sftp?, percorso?}
+ *                                              Google Drive: {ricollega?: true (stessa chiave: cambio account), client_id?, client_secret?}
  *   POST /api/v1/backup/destinazione/google    {indirizzo}: secondo passo del collegamento a Google Drive
  *   POST /api/v1/backup/scollega               {password}
  *   POST /api/v1/backup/chiave                 {password}: chiave dei backup (nella risposta, una volta)
@@ -85,7 +86,8 @@ final class BackupRoutes
             $summary = static fn (string $what): string => (string) json_encode(['destinazione' => $what, 'chiave_esistente' => $key !== ''], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
             return match ($q->input('tipo')) {
-                'gdrive' => self::enqueue($kernel, $user, 'gdrive_avvia', $withKey, $summary('Google Drive')),
+                'gdrive' => self::enqueue($kernel, $user, 'gdrive_avvia', $withKey + self::googleParams($q, $key !== ''),
+                    $summary(($q->json()['ricollega'] ?? false) === true ? 'Google Drive (ricollega, stessa chiave)' : 'Google Drive')),
                 'sftp' => self::enqueue($kernel, $user, 'sftp', [
                     'destinazione' => self::sftpTarget($q->input('destinazione')),
                     'password_b64' => base64_encode($q->input('password_sftp')),
@@ -191,6 +193,36 @@ final class BackupRoutes
                 'X-Content-Type-Options' => 'nosniff',
             ]);
         }));
+    }
+
+    /**
+     * Google Drive: ricollegamento con la stessa chiave e client OAuth proprio (facoltativo).
+     *
+     * @return array<string, string>
+     */
+    private static function googleParams(Request $q, bool $withKey): array
+    {
+        $params = [];
+        if (($q->json()['ricollega'] ?? false) === true) {
+            if ($withKey) {
+                throw new BackupException('Per ricollegare si usa la chiave attuale: lasciare vuota la chiave esistente');
+            }
+            $params['mantieni_chiave'] = '1';
+        }
+        $id = trim($q->input('client_id'));
+        $secret = trim($q->input('client_secret'));
+        if ($id !== '' || $secret !== '') {
+            if (!preg_match('/^[0-9]{4,30}-[a-z0-9]{8,64}\.apps\.googleusercontent\.com$/', $id)) {
+                throw new BackupException('Client ID di Google non valido (formato NUMERI-xxxx.apps.googleusercontent.com)');
+            }
+            if (!preg_match('/^[A-Za-z0-9_-]{10,128}$/', $secret)) {
+                throw new BackupException('Client Secret di Google mancante o non valido');
+            }
+            $params['client_id'] = $id;
+            $params['client_secret_b64'] = base64_encode($secret);
+        }
+
+        return $params;
     }
 
     /** @param \Closure(User): Response $action */

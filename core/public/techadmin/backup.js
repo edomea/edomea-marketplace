@@ -120,7 +120,9 @@ function render(data) {
 
   // Destinazione
   $("dest-attuale").textContent = dest.collegata ? "Destinazione: " + dest.descrizione : "Nessuna destinazione remota collegata.";
+  renderDestDetails(dest);
   $("dest-azioni").hidden = !dest.collegata;
+  $("ricollega").hidden = !(dest.collegata && dest.tipo === "gdrive");
   if ($("google-box").hidden && $("chiave-box").hidden) {
     $("collega").hidden = dest.collegata && !$("collega").dataset.cambia;
     $("annulla-collega").hidden = !dest.collegata;
@@ -133,6 +135,21 @@ function render(data) {
     renderList("remoti", s.remoti || [], "remoto", dest.raggiungibile ? "Nessun backup sulla destinazione remota." : "Destinazione non raggiungibile ora.");
   }
   renderJob(data.lavoro);
+}
+
+// Account Google collegato, da quando e con quale client (mai il Client Secret).
+function renderDestDetails(dest) {
+  const list = $("dest-dettagli");
+  const rows = [];
+  if (dest.collegata && dest.tipo === "gdrive") {
+    rows.push("Account Google: " + (dest.account || "non ancora letto (si legge al prossimo controllo della destinazione; se resta così usa \"Cambia account / Ricollega\")"));
+  }
+  if (dest.collegata && dest.dal) rows.push("Collegata dal " + fmtDate(dest.dal));
+  if (dest.collegata && dest.tipo === "gdrive") {
+    rows.push("Client Google: " + (dest.client_proprio ? "proprio (" + dest.client_proprio + ")" : "predefinito"));
+  }
+  list.replaceChildren(...rows.map((t) => el("li", t)));
+  list.hidden = rows.length === 0;
 }
 
 function renderList(table, items, origin, empty) {
@@ -323,7 +340,44 @@ $("cambia-dest").addEventListener("click", () => {
   $("collega").dataset.cambia = "1";
   $("collega").hidden = false;
   $("annulla-collega").hidden = false;
+  clearAutofilledKey();
 });
+
+// ---- Chiave dei backup esistente: niente riempimento automatico, formato controllato subito ----
+
+const KEY_RE = /^EMP-BK(-[A-Z2-7]{6}){5}$/;
+const KEY_PREFIX_RE = /^E(M(P(-(B(K(-[A-Z2-7-]{0,34})?)?)?)?)?)?$/;
+
+/** Messaggio d'errore per la chiave scritta (null se vuota o valida). */
+function keyProblem(value, complete) {
+  if (value === "") return null;
+  if (KEY_RE.test(value)) return null;
+  if (!complete && KEY_PREFIX_RE.test(value)) return null; // si sta ancora scrivendo
+  return "Formato non valido: la chiave è come EMP-BK-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX (lettere A-Z e cifre 2-7). "
+    + "Se non hai una chiave di un server precedente, lascia il campo vuoto.";
+}
+
+function checkKey(complete) {
+  const input = $("chiave-esistente");
+  const value = input.value.trim().toUpperCase().replace(/\s+/g, "");
+  if (value !== input.value) input.value = value;
+  const problem = keyProblem(value, complete);
+  $("chiave-errore").textContent = problem || "";
+  $("chiave-errore").hidden = !problem;
+  input.setAttribute("aria-invalid", problem ? "true" : "false");
+  return !problem;
+}
+
+// Se il browser ha messo qui un nome utente o altro, si svuota: la chiave si scrive sempre a mano.
+function clearAutofilledKey() {
+  const input = $("chiave-esistente");
+  if (input.value && !KEY_PREFIX_RE.test(input.value.trim().toUpperCase())) input.value = "";
+  checkKey(false);
+}
+
+$("chiave-esistente").addEventListener("input", () => checkKey(false));
+$("chiave-esistente").addEventListener("blur", () => checkKey(true));
+$("chiave-esistente").addEventListener("change", () => checkKey(true));
 $("annulla-collega").addEventListener("click", () => {
   delete $("collega").dataset.cambia;
   $("collega").reset();
@@ -335,27 +389,53 @@ $("collega").addEventListener("submit", (ev) => {
   ev.preventDefault();
   const f = ev.target.elements;
   const tipo = ev.target.querySelector("input[name=tipo]:checked").value;
+  if (!checkKey(true)) {
+    toast("Chiave dei backup esistente non valida", true);
+    return f.chiave.focus();
+  }
   if (!f.password.value) {
     toast("Inserire la tua password", true);
     return f.password.focus();
   }
+  if (tipo === "gdrive" && (f.client_id.value.trim() !== "") !== (f.client_secret.value.trim() !== "")) {
+    toast("Client Google proprio: servono sia il Client ID sia il Client Secret (oppure nessuno dei due)", true);
+    return (f.client_id.value.trim() ? f.client_secret : f.client_id).focus();
+  }
   action(async () => {
     const body = { tipo, password: f.password.value, chiave: f.chiave.value.trim() };
+    if (tipo === "gdrive" && f.client_id.value.trim()) {
+      Object.assign(body, { client_id: f.client_id.value.trim(), client_secret: f.client_secret.value.trim() });
+    }
     if (tipo === "sftp") Object.assign(body, { destinazione: f.destinazione.value.trim(), password_sftp: f.password_sftp.value });
     if (tipo === "cartella") body.percorso = f.percorso.value.trim();
     const r = await perform("destinazione", body, tipo === "gdrive" ? 60000 : 600000);
     f.password.value = "";
     f.password_sftp.value = "";
+    f.client_secret.value = "";
     if (tipo === "gdrive") {
-      $("google-link").href = r.dati.url;
-      $("collega").hidden = true;
-      $("google-box").hidden = false;
-      $("google").reset();
+      showGoogle(r.dati.url);
       return;
     }
     connected(r);
   });
 });
+
+function showGoogle(url) {
+  $("google-link").href = url;
+  $("collega").hidden = true;
+  $("google-box").hidden = false;
+  $("google").reset();
+}
+
+// Cambia account Google o ricollega lo stesso (token scaduto, accesso revocato): resta la stessa
+// chiave dei backup, così quelli già su Drive si aprono ancora; il client Google proprio resta.
+$("ricollega").addEventListener("click", () => askPassword($("conferma-box"),
+  "Cambia account / Ricollega Google Drive (resta la stessa chiave dei backup). Con lo stesso account si "
+  + "ritrovano i backup già inviati; con un account diverso quelli vecchi restano sull'altro account.", false, (pw) => action(async () => {
+    const r = await perform("destinazione", { tipo: "gdrive", password: pw, ricollega: true }, 60000);
+    $("conferma-box").hidden = true;
+    showGoogle(r.dati.url);
+  }), () => { $("conferma-box").hidden = true; }));
 
 $("google").addEventListener("submit", (ev) => {
   ev.preventDefault();
@@ -374,6 +454,7 @@ $("google-annulla").addEventListener("click", () => {
 function connected(r) {
   delete $("collega").dataset.cambia;
   $("collega").reset();
+  checkKey(false);
   showType();
   toast(r.messaggio);
   if (r.dati && r.dati.chiave) showKey(r.dati.chiave, true);
@@ -436,8 +517,13 @@ function showKey(key, isNew) {
 
 // ---- Avvio ------------------------------------------------------------------------------------
 
-EMP.api("accesso/stato").then((s) => EMP.showUser(s.utente)).catch(() => {});
+EMP.api("accesso/stato").then((s) => {
+  EMP.showUser(s.utente);
+  if (s.utente) $("collega-utente").value = s.utente.username;
+}).catch(() => {});
 showType();
+// Il browser può riempire i campi dopo il caricamento: si ricontrolla la chiave poco dopo.
+setTimeout(clearAutofilledKey, 600);
 load().then(() => {
   // All'apertura si rilegge lo stato da EMP Server (anche l'elenco della destinazione remota).
   if (current) EMP.api("backup/aggiorna", "POST", {}).then(startPolling).catch(() => {});

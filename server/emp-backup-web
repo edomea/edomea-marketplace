@@ -32,6 +32,8 @@ const NAME_PATTERN = '/^emp-backup-[a-z0-9.-]{1,160}\.tar$/';
 const USER_PATTERN = '/^[a-z0-9][a-z0-9._-]{2,63}$/';
 const ID_PATTERN = '/^[0-9a-f]{32}$/';
 const AUTH_PORT = 53682;
+const GOOGLE_CLIENT_ID = '/^[0-9]{4,30}-[a-z0-9]{8,64}\.apps\.googleusercontent\.com$/';
+const GOOGLE_CLIENT_SECRET = '/^[A-Za-z0-9_-]{10,128}$/';
 
 final class Worker
 {
@@ -44,6 +46,7 @@ final class Worker
     private string $empServer;
     private string $rclone;
     private string $authDir;
+    private string $remoteConf;
     private bool $useSystemd;
     /** @var array<string, mixed>|null */
     private ?array $job = null;
@@ -61,6 +64,7 @@ final class Worker
         $this->empServer = getenv('EMP_WEB_SERVER_CMD') ?: '/usr/local/sbin/emp-server';
         $this->rclone = getenv('EMP_WEB_RCLONE') ?: 'rclone';
         $this->authDir = getenv('EMP_WEB_AUTH_DIR') ?: '/run/emp-gdrive';
+        $this->remoteConf = getenv('EMP_WEB_REMOTE_CONF') ?: '/etc/emp/backup-remoto/rclone.conf';
         $this->useSystemd = getenv('EMP_WEB_SYSTEMD') !== '0';
     }
 
@@ -351,6 +355,20 @@ final class Worker
     private function googleStart(array $r): array
     {
         $key = $this->optionalKey($r);
+        // "Cambia account / Ricollega": stessa chiave dei backup (e stesso client Google, se proprio),
+        // così i backup già su Drive restano leggibili.
+        $keep = ($r['mantieni_chiave'] ?? '') === '1';
+        if ($keep) {
+            if ($key !== null) {
+                throw new Failure('Per ricollegare si usa la chiave attuale: lasciare vuota la chiave esistente');
+            }
+            [$rc, $out] = $this->runQuiet(['backup-remoto', 'chiave']);
+            if ($rc !== 0 || !preg_match(KEY_PATTERN, $out, $m)) {
+                throw new Failure('Nessuna destinazione collegata da ricollegare: usare "Collega una destinazione"');
+            }
+            $key = $m[0];
+        }
+        [$clientId, $clientSecret] = $this->googleClient($r, $keep);
         $this->googleStop();
         if (!is_dir($this->authDir) && !@mkdir($this->authDir, 0700, true)) {
             throw new Failure('Cartella temporanea non disponibile');
@@ -359,7 +377,11 @@ final class Worker
         @unlink($out);
         // Opzioni per rclone authorize: accesso solo ai file creati da EMP.
         // Formato di rclone: JSON in base64 senza "=" finali (RawStdEncoding).
-        $blob = rtrim(base64_encode('{"scope":"drive.file"}'), '=');
+        $options = ['scope' => 'drive.file'];
+        if ($clientId !== null) {
+            $options += ['client_id' => $clientId, 'client_secret' => $clientSecret];
+        }
+        $blob = rtrim(base64_encode((string) json_encode($options, JSON_UNESCAPED_SLASHES)), '=');
         $cmd = ['/bin/sh', '-c', 'exec "$0" authorize drive "$1" --auth-no-open-browser --config "$2" > "$3" 2>&1',
             $this->rclone, $blob, $this->authDir . '/vuoto.conf', $out];
         if ($this->useSystemd) {
@@ -389,7 +411,8 @@ final class Worker
             $this->googleStop();
             throw new Failure('Indirizzo di Google non ottenuto');
         }
-        $this->writeJson($this->work . '/gdrive.json', ['state' => $local[1], 'chiave' => $key, 'avviato' => time()], 0600);
+        $this->writeJson($this->work . '/gdrive.json', ['state' => $local[1], 'chiave' => $key, 'avviato' => time(),
+            'client_id' => $clientId, 'client_secret' => $clientSecret], 0600);
 
         return ['messaggio' => 'Aprire Google e consentire l\'accesso.', 'dati' => ['url' => $google]];
     }
@@ -445,13 +468,56 @@ final class Worker
             throw new Failure('Google non ha concesso l\'accesso (codice già usato o scaduto): ripartire da "Collega Google Drive"');
         }
         $tokenFile = $this->secretFile((string) json_encode($decoded, JSON_UNESCAPED_SLASHES));
+        $secretFile = null;
         try {
             $args = ['backup-remoto', 'collega', 'gdrive', '--token-file', $tokenFile];
+            $clientId = is_string($pending['client_id'] ?? null) ? $pending['client_id'] : '';
+            $clientSecret = is_string($pending['client_secret'] ?? null) ? $pending['client_secret'] : '';
+            if (preg_match(GOOGLE_CLIENT_ID, $clientId) && preg_match(GOOGLE_CLIENT_SECRET, $clientSecret)) {
+                $secretFile = $this->secretFile($clientSecret);
+                array_push($args, '--client-id', $clientId, '--client-secret-file', $secretFile);
+            }
 
             return $this->connect($args, ['chiave' => (string) ($pending['chiave'] ?? '')]);
         } finally {
             @unlink($tokenFile);
+            if ($secretFile !== null) {
+                @unlink($secretFile);
+            }
         }
+    }
+
+    /**
+     * Client OAuth di Google facoltativo (progetto Google proprio). Se non indicato e si ricollega,
+     * si riusa quello della destinazione attuale; altrimenti quello predefinito di rclone.
+     *
+     * @param array<string, string> $r
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function googleClient(array $r, bool $keep): array
+    {
+        $id = trim($r['client_id'] ?? '');
+        $secret = base64_decode($r['client_secret_b64'] ?? '', true);
+        $secret = $secret === false ? '' : trim($secret);
+        if ($id !== '' || $secret !== '') {
+            if (!preg_match(GOOGLE_CLIENT_ID, $id)) {
+                throw new Failure('Client ID di Google non valido (formato NUMERI-xxxx.apps.googleusercontent.com)');
+            }
+            if (!preg_match(GOOGLE_CLIENT_SECRET, $secret)) {
+                throw new Failure('Client Secret di Google mancante o non valido');
+            }
+
+            return [$id, $secret];
+        }
+        if ($keep && is_readable($this->remoteConf)) {
+            $text = (string) @file_get_contents($this->remoteConf, false, null, 0, 65536);
+            if (preg_match('/^client_id = (\S+)$/m', $text, $a) && preg_match('/^client_secret = (\S+)$/m', $text, $b)
+                && preg_match(GOOGLE_CLIENT_ID, $a[1]) && preg_match(GOOGLE_CLIENT_SECRET, $b[1])) {
+                return [$a[1], $b[1]];
+            }
+        }
+
+        return [null, null];
     }
 
     /**
@@ -591,7 +657,8 @@ final class Worker
 
         $local = [];
         $remote = [];
-        $destination = ['collegata' => false, 'descrizione' => null, 'raggiungibile' => null];
+        $destination = ['collegata' => false, 'descrizione' => null, 'raggiungibile' => null,
+            'tipo' => null, 'dal' => null, 'account' => null, 'client_proprio' => null];
         [$rc, $out] = $this->runQuiet(['backup-elenco', '--tsv']);
         foreach ($rc === 0 ? explode("\n", $out) : [] as $line) {
             $f = explode("\t", $line);
@@ -600,7 +667,15 @@ final class Worker
             } elseif ($f[0] === 'remoto' && count($f) === 4 && preg_match(NAME_PATTERN, $f[1])) {
                 $remote[] = ['nome' => $f[1], 'byte' => (int) $f[2], 'data' => (int) $f[3] > 0 ? date(DATE_ATOM, (int) $f[3]) : null];
             } elseif ($f[0] === 'destinazione' && count($f) === 3) {
-                $destination = ['collegata' => true, 'descrizione' => mb_substr($f[1], 0, 200), 'raggiungibile' => $f[2] === '1'];
+                $destination = ['collegata' => true, 'descrizione' => mb_substr($f[1], 0, 200), 'raggiungibile' => $f[2] === '1'] + $destination;
+            } elseif (count($f) === 2 && in_array($f[0], ['tipo', 'dal', 'account', 'client'], true)) {
+                $v = mb_substr($f[1], 0, 254);
+                match ($f[0]) {
+                    'tipo' => $destination['tipo'] = in_array($v, ['gdrive', 'sftp', 'locale'], true) ? $v : null,
+                    'dal' => $destination['dal'] = ctype_digit($v) && $v !== '0' ? date(DATE_ATOM, (int) $v) : null,
+                    'account' => $destination['account'] = $v !== '' ? $v : null,
+                    'client' => $destination['client_proprio'] = $v !== 'predefinito' && preg_match(GOOGLE_CLIENT_ID, $v) ? $v : null,
+                };
             }
         }
         $this->writeJson($this->web . '/stato.json', [

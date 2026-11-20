@@ -210,8 +210,27 @@ cmd_indirizzi() {
     [[ $any -eq 1 ]] || echo "  (nessun indirizzo di rete privata: controllare la scheda di rete della VM, modalità Bridged)"
 }
 
+# Per il Control Center di /techadmin: servizi, certificato, disco, memoria, avvio della macchina.
+server_status_tsv() {
+    local svc state
+    for svc in nginx "php$(php_version)-fpm" mariadb emp-backup.timer; do
+        state=$(systemctl is-active "$svc" 2>/dev/null || true)
+        printf 'servizio\t%s\t%s\n' "$svc" "${state:-sconosciuto}"
+    done
+    if [[ -f $EMP_TLS/server.crt ]]; then
+        printf 'certificato_scade\t%s\n' "$(date -d "$(openssl x509 -in "$EMP_TLS/server.crt" -noout -enddate | cut -d= -f2)" +%s 2>/dev/null || echo 0)"
+    fi
+    { df -B1 --output=avail,size "$EMP_DATA" 2>/dev/null || true; } | awk 'NR==2 {printf "disco\t%s\t%s\n", $1, $2}'
+    awk '/^MemAvailable:/ {a=$2} /^MemTotal:/ {t=$2} END {printf "memoria\t%d\t%d\n", a*1024, t*1024}' /proc/meminfo || true
+    printf 'avviato\t%s\n' "$(($(date +%s) - $(cut -d. -f1 /proc/uptime)))"
+    printf 'nome\t%s\n' "$(host_name)"
+    printf 'indirizzo\t%s\n' "$(first_private_ipv4)"
+    return 0
+}
+
 cmd_stato() {
     require_root stato
+    if [[ ${1:-} == --tsv ]]; then server_status_tsv; return 0; fi
     local svc state
     echo "EMP Server $(cat "$EMP_HOME/VERSIONE" 2>/dev/null || echo '?') — $(lsb_release -ds 2>/dev/null || true)"
     for svc in nginx "php$(php_version)-fpm" mariadb; do
@@ -1517,7 +1536,7 @@ main() {
     local cmd=${1:-}
     shift || true
     case $cmd in
-        stato) cmd_stato ;;
+        stato) cmd_stato "$@" ;;
         indirizzi) cmd_indirizzi ;;
         codice-setup) cmd_codice_setup ;;
         recupero-tecnico) cmd_recupero_tecnico "$@" ;;

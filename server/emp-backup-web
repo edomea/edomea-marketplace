@@ -689,6 +689,7 @@ final class Worker
         $this->writeJson($this->web . '/stato.json', [
             'formato' => VERSION_FORMAT,
             'sistema' => $this->systemState(),
+            'server' => $this->serverState(),
             'aggiornato' => date(DATE_ATOM),
             'disponibile' => $rc === 0,
             'impostazioni' => $settings,
@@ -696,6 +697,35 @@ final class Worker
             'locali' => $local,
             'remoti' => $remote,
         ], 0640, true);
+    }
+
+    /**
+     * Stato della macchina per il Control Center (da "emp-server stato --tsv").
+     *
+     * @return array<string, mixed>
+     */
+    private function serverState(): array
+    {
+        $s = ['servizi' => [], 'certificato_scade' => null, 'disco_libero' => null, 'disco_totale' => null,
+            'memoria_libera' => null, 'memoria_totale' => null, 'avviato' => null, 'nome' => '', 'indirizzo' => ''];
+        [$rc, $out] = $this->runQuiet(['stato', '--tsv']);
+        foreach ($rc === 0 ? explode("\n", $out) : [] as $line) {
+            $f = explode("\t", $line);
+            $epoch = static fn (string $v): ?string => ctype_digit($v) && $v !== '0' ? date(DATE_ATOM, (int) $v) : null;
+            match ($f[0]) {
+                'servizio' => count($f) === 3 && count($s['servizi']) < 10
+                    ? $s['servizi'][] = ['nome' => mb_substr($f[1], 0, 64), 'stato' => mb_substr($f[2], 0, 32)] : null,
+                'certificato_scade' => $s['certificato_scade'] = $epoch($f[1] ?? ''),
+                'disco' => count($f) === 3 ? [$s['disco_libero'], $s['disco_totale']] = [(int) $f[1], (int) $f[2]] : null,
+                'memoria' => count($f) === 3 ? [$s['memoria_libera'], $s['memoria_totale']] = [(int) $f[1], (int) $f[2]] : null,
+                'avviato' => $s['avviato'] = $epoch($f[1] ?? ''),
+                'nome' => $s['nome'] = mb_substr($f[1] ?? '', 0, 64),
+                'indirizzo' => $s['indirizzo'] = mb_substr($f[1] ?? '', 0, 45),
+                default => null,
+            };
+        }
+
+        return $s;
     }
 
     /**

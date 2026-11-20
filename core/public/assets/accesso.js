@@ -13,7 +13,7 @@ const RUOLI = { amministratore: "Amministratore", operatore: "Operatore" };
 let current = null;
 
 function show(ids) {
-  for (const id of ["login-box", "password-box", "links-box", "profile-box", "ws-box", "users-box"]) {
+  for (const id of ["login-box", "password-box", "links-box", "cc-box", "profile-box", "ws-box", "users-box"]) {
     if ($(id)) $(id).hidden = !ids.includes(id);
   }
   $("logout").hidden = !current;
@@ -51,7 +51,8 @@ async function load() {
   if ($("link-backup")) $("link-backup").hidden = current.ruolo !== "tecnico";
   if ($("link-sistema")) $("link-sistema").hidden = current.ruolo !== "tecnico";
   if ($("link-marchio")) $("link-marchio").hidden = current.ruolo !== "tecnico";
-  show(["links-box", "profile-box"]);
+  show(["links-box", "cc-box", "profile-box"]);
+  if (typeof window.caricaCentro === "function" && $("cc-box")) window.caricaCentro();
   await Promise.all([loadProfile(), loadUsers(), loadWorkstations()]);
 }
 

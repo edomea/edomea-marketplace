@@ -24,6 +24,11 @@
       <button type="submit">Accedi</button>
     </form>
     <p class="note">Password dimenticata? Gli utenti operativi si rivolgono al proprio amministratore, gli amministratori all'Amministratore Tecnico.</p>
+    <p class="note"><a href="#" id="show-pair">Associa questa postazione</a> con il codice ricevuto dall'amministratore.</p>
+    <form id="pair-form" class="riga" novalidate hidden>
+      <label>Codice di associazione <input name="codice" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="ABCD-EFGH" required></label>
+      <button type="submit">Associa</button>
+    </form>
   </section>
 
   <!-- Cambio password (obbligatorio dopo una password temporanea) -->
@@ -73,6 +78,29 @@
       <button type="submit" class="conferma">Chiudi le altre sessioni</button>
       <button type="button" id="pf-chiudi-annulla" class="secondario">Annulla</button>
     </form>
+  </section>
+
+  <!-- Postazioni autorizzate (Tecnico e amministratori) -->
+  <section id="ws-box" class="box" hidden>
+    <h2>Postazioni autorizzate</h2>
+    <p class="note">I PC e i tablet del negozio da cui si usa EMP. Questa postazione: <strong id="ws-questa">—</strong>.</p>
+    <label class="spunta" id="ws-obbligo-riga" hidden><input type="checkbox" id="ws-obbligo">
+      Gli operatori accedono solo dalle postazioni autorizzate (Tecnico e amministratori da qualsiasi postazione)</label>
+    <p id="ws-obbligo-stato" class="note"></p>
+    <table id="ws">
+      <thead><tr><th>Postazione</th><th>Stato</th><th>Ultimo uso</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <h3>Aggiungi una postazione</h3>
+    <form id="ws-new" class="riga" novalidate>
+      <label>Nome <input name="nome" maxlength="64" autocomplete="off" placeholder="es. Cassa 1" required></label>
+      <button type="submit" name="modo" value="codice">Crea un codice di associazione</button>
+      <button type="submit" name="modo" value="questa" class="secondario">Autorizza questa postazione</button>
+    </form>
+    <div id="ws-codice" class="box" hidden></div>
+    <p class="note">Con il <strong>codice</strong>: sulla nuova postazione apri questa pagina, scegli "Associa questa postazione" e scrivi il
+      codice (vale 30 minuti, una volta sola). Con <strong>Autorizza questa postazione</strong> autorizzi il browser che stai usando ora.
+      Revocando una postazione si chiudono subito le sessioni aperte da lì.</p>
   </section>
 
   <!-- Utenti gestiti -->

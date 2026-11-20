@@ -289,6 +289,21 @@ configure_services() {
     fi
 }
 
+# Server collegato a GitHub: il comando che il runner esegue come root si aggiorna con la release.
+# Sostituzione con un file nuovo (rename): il comando in esecuzione, che sta lanciando proprio
+# questa installazione, continua a leggere la sua copia senza interruzioni.
+update_github_command() {
+    local cmd=/usr/local/sbin/emp-installa-da-github tmp
+    [[ -f $cmd ]] || return 0
+    if cmp -s "$SOURCE_DIR/github/emp-installa-da-github" "$cmd"; then
+        return 0
+    fi
+    tmp=$(mktemp /usr/local/sbin/.emp-installa-da-github-XXXXXX)
+    install -m 0755 -o root -g root "$SOURCE_DIR/github/emp-installa-da-github" "$tmp"
+    mv -f -- "$tmp" "$cmd"
+    info "Comando di installazione da GitHub aggiornato ($cmd)"
+}
+
 install_programs() {
     install -d -m 0755 -o root -g root "$EMP_HOME"
     install -m 0755 "$SOURCE_DIR/emp-server" "$EMP_HOME/emp-server"
@@ -299,6 +314,7 @@ install_programs() {
     if [[ -d $SOURCE_DIR/github ]]; then
         install -d -m 0755 -o root -g root "$EMP_HOME/github"
         install -m 0755 "$SOURCE_DIR/github/prepara-runner.sh" "$SOURCE_DIR/github/emp-installa-da-github" "$EMP_HOME/github/"
+        update_github_command
     fi
     ln -sfn "$EMP_HOME/emp-server" /usr/local/sbin/emp-server
     # Copia del pacchetto installato: va nei backup, così un ripristino rimette questa versione.

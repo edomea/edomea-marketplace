@@ -64,6 +64,15 @@ Un amministratore, sugli utenti che gestisce, può:
 - **Modifica di un account gestito:** il Tecnico modifica nome e cognome e nome utente degli Amministratori Operativi, l'Amministratore quelli dei suoi operatori. Nessuno modifica chi sta sopra di lui.
 - Ogni modifica va nel registro di tracciabilità con i valori prima e dopo.
 
+## 5.1.1 Postazioni autorizzate
+
+Le postazioni sono i browser dei PC e dei tablet del negozio. Una postazione autorizzata conserva un token permanente nel cookie `emp_postazione` (HttpOnly, solo HTTPS, 5 anni); nel database c'è solo la sua impronta.
+- **Chi le gestisce:** il Tecnico e gli amministratori, dal riquadro *Postazioni autorizzate* di /techadmin e /admin (solo in HTTPS).
+- **Come si aggiungono:** con un **codice di associazione** monouso, valido 30 minuti, che si scrive sulla nuova postazione ("Associa questa postazione" nella pagina di accesso); oppure con **Autorizza questa postazione** dal browser in uso. Codici sbagliati: massimo 10 ogni 15 minuti per indirizzo.
+- **Obbligo** (lo decide solo il Tecnico, con almeno una postazione attiva): gli **operatori** accedono solo dalle postazioni autorizzate. Tecnico e amministratori accedono da qualsiasi postazione, per non restare chiusi fuori.
+- **Revoca:** il token non vale più e le sessioni aperte da quella postazione si chiudono subito.
+- In fondo a ogni pagina compare il nome della postazione in uso. Ogni operazione è tracciata.
+
 ## 5.2 Marchio white label
 
 Il Tecnico sceglie dalla pagina **Marchio** di /techadmin (solo in HTTPS) il nome dell'attività, il colore principale e il logo, che compaiono in tutte le pagine di /admin e /techadmin (intestazione e titolo della scheda), anche in quelle di accesso.

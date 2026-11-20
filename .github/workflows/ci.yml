@@ -142,6 +142,14 @@ jobs:
           test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/marchio" -d '{"nome":"Negozio CI","colore":"#ffff00"}')" = 422
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/marchio" -d '{"nome":"Negozio CI","colore":"#0b3d2e"}' | jq -e '.marchio.nome == "Negozio CI"' >/dev/null
           curl -fsS --cacert "$CA" "$B/api/v1/marchio" | jq -e '.colore == "#0b3d2e" and .predefinito == false' >/dev/null
+          # Postazioni autorizzate: codice di associazione, cookie della postazione, obbligo per gli operatori.
+          COD=$(curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/postazioni/codice" -d '{"nome":"Cassa CI"}' | jq -er .codice)
+          test "$(code -c "$RUNNER_TEMP/pc" "${J[@]}" -X POST "$B/api/v1/postazioni/associa" -d '{"codice":"AAAA-BBBB"}')" = 401
+          curl -fsS -c "$RUNNER_TEMP/pc" "${J[@]}" -X POST "$B/api/v1/postazioni/associa" -d "{\"codice\":\"$COD\"}" | jq -e .ok >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/pc" --cacert "$CA" "$B/api/v1/postazioni/questa" | jq -e '.postazione.nome == "Cassa CI"' >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/postazioni/obbligo" -d '{"attivo":true}' | jq -e .ok >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/postazioni" | jq -e '.obbligatorie and (.postazioni | length) == 1' >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/postazioni/obbligo" -d '{"attivo":false}' | jq -e .ok >/dev/null
           # Profilo del Tecnico: visibile, modificabile solo con la password.
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/accesso/profilo" | jq -e '.profilo.username == "tecnico" and .profilo.sessioni_aperte >= 1' >/dev/null
           test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/profilo" -d '{"nome":"X","username":"tecnico","password":"sbagliata"}')" = 403

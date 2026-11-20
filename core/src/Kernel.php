@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Emp\Core;
 
 use Emp\Core\Access\AccessService;
+use Emp\Core\Access\WorkstationService;
 use Emp\Core\Backup\BackupBridge;
 use Emp\Core\Brand\BrandService;
 use Emp\Core\Http\CsrfGuard;
@@ -145,6 +146,12 @@ final class Kernel
     public function access(): AccessService
     {
         return $this->access ??= new AccessService($this->installer->pdo(), $this->installer->tablePrefix('core_'), $this->clock);
+    }
+
+    /** Postazioni autorizzate del negozio. */
+    public function workstations(): WorkstationService
+    {
+        return new WorkstationService($this->installer->pdo(), $this->installer->tablePrefix('core_'), $this->clock);
     }
 
     /** Gestione dei plugin (pagina web Plugin del Core). */

@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="/assets/stile.css">
 <script defer src="/assets/comune.js"></script>
 <script defer src="/assets/accesso.js"></script>
+<script defer src="centro.js"></script>
 </head>
 <body data-area="techadmin">
 <header class="emp-header">
@@ -44,13 +45,15 @@
     </form>
   </section>
 
-  <!-- Collegamenti -->
-  <section id="links-box" class="box" hidden>
-    <h2>Funzioni</h2>
-    <p id="link-plugin" hidden><a href="plugin.html">Plugin</a> — installazione e aggiornamento dei plugin (solo in HTTPS)</p>
-    <p id="link-backup" hidden><a href="backup.html">Backup</a> — backup, copia cifrata remota (Google Drive, SFTP), download e ripristino (solo in HTTPS)</p>
-    <p id="link-marchio" hidden><a href="marchio.html">Marchio</a> — nome, colore e logo dell'attività in tutte le pagine (white label, solo in HTTPS)</p>
-    <p id="link-sistema" hidden><a href="sistema.html">Sistema</a> — verifica e installazione degli aggiornamenti di Ubuntu, riavvio del server (solo in HTTPS)</p>
+  <!-- Control Center: stato di tutto il server a colpo d'occhio, ogni scheda porta alla sua pagina -->
+  <section id="cc-box" hidden>
+    <div class="riga-azioni cc-testa">
+      <h2>Control Center</h2>
+      <button type="button" id="cc-aggiorna" class="secondario piccolo">Aggiorna</button>
+      <span id="cc-aggiornato" class="note centrata"></span>
+    </div>
+    <div id="cc-avviso" class="box err" hidden></div>
+    <div class="schede" id="cc-schede"></div>
   </section>
 
   <!-- Profilo dell'utente collegato -->

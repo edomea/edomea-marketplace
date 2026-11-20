@@ -437,7 +437,7 @@ jobs:
           sudo emp-server backup-remoto collega locale /srv/emp-remoto --chiave "$(cat "$RUNNER_TEMP/chiave-backup")"
           sudo emp-server ripristina --remoto "$ORIG" --si | tee "$RUNNER_TEMP/ripristino.log"
           # Dati del server originale; identità (nome, certificato) della macchina nuova.
-          test "$(sudo mariadb -N -e 'SELECT username FROM emp.emp_core_users')" = tecnico
+          test "$(sudo mariadb -N -e 'SELECT username FROM emp.emp_core_users WHERE role = "tecnico"')" = tecnico
           sudo emp-server moduli | grep -q emp-esempio
           test "$(hostname -s)" = cliente-prova
           test "$(sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -fingerprint -sha256)" = "$NEW_FP"

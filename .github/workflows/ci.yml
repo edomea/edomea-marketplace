@@ -209,6 +209,7 @@ jobs:
           curl -fsS --cacert "$CA" "$B/api/v1/salute" | jq -e '.avvio_sicuro == false' >/dev/null
           curl -fsS --cacert "$CA" "$B/api/v1/esempio" | grep -q '"modulo":"emp-esempio"'
           # EMP Studio dal catalogo: pagina nel menu, schede, foto servite da /m-file/, permessi.
+          trap 'echo "FALLITO alla riga $LINENO: $BASH_COMMAND" >&2; sudo tail -n 20 /var/log/nginx/emp-errori.log >&2; sudo ls -la /var/lib/emp/moduli/emp-studio /var/lib/emp/moduli/emp-studio/public >&2 || true' ERR
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/emp-studio/installa" | jq -e .ok >/dev/null
           curl -fsS --cacert "$CA" "$B/m/emp-studio/index.html" | grep 'data-voce="emp-studio:catalogo"' >/dev/null
           test "$(code --cacert "$CA" "$B/m/emp-studio/../emp-module.json")" != 200

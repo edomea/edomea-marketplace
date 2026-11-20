@@ -20,7 +20,8 @@ use Emp\Core\Support\Clock;
  *    'server_version' => '0.6.0-alpha.7',         // facoltativo: versione di EMP Server, mostrata nelle pagine
  *    'arrivals_dir' => '/…/arrivi/plugin',        // facoltativo: plugin caricati via scp
  *    'backup_web_dir' => '/var/lib/emp/backup-web',  // facoltativo: scambio con il servizio dei backup di EMP Server
- *    'boot_control_file' => '/etc/emp/avvio.conf']    // facoltativo: avvio sicuro e plugin disattivati dalla console
+ *    'boot_control_file' => '/etc/emp/avvio.conf',
+ *    'module_data_dir' => '/var/lib/emp/dati-moduli']  // facoltativo: file dei plugin (foto…)    // facoltativo: avvio sicuro e plugin disattivati dalla console
  */
 final class Config
 {
@@ -81,6 +82,7 @@ final class Config
         $arrivals = $this->values['arrivals_dir'] ?? null;
         $backup = $this->values['backup_web_dir'] ?? null;
         $boot = $this->values['boot_control_file'] ?? null;
+        $moduleData = $this->values['module_data_dir'] ?? null;
 
         return new Kernel(
             $this->modulesDir(),
@@ -93,6 +95,7 @@ final class Config
             is_string($arrivals) && $arrivals !== '' ? $arrivals : null,
             is_string($backup) && $backup !== '' ? $backup : null,
             is_string($boot) && $boot !== '' ? $boot : null,
+            is_string($moduleData) && $moduleData !== '' ? $moduleData : null,
         );
     }
 }

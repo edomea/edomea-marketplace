@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "emp-studio",
+  "name": "EMP Studio",
+  "version": "0.1.0",
+  "type": "plugin",
+  "description": "Schede anagrafiche dei prodotti: codici ed EAN, marche, categorie, famiglie con i loro attributi, testi, foto, video e documenti, varianti, completezza della scheda.",
+  "php": ">=8.2.0",
+  "requires": {
+    "emp-core": ">=0.1.19 <0.2.0"
+  },
+  "class": "Emp\\Plugin\\Studio\\Module",
+  "autoload": { "Emp\\Plugin\\Studio\\": "src/" },
+  "table_prefix": "studio_",
+  "migrations": "migrations",
+  "permissions": ["studio.vedi", "studio.modifica", "studio.configura"],
+  "pages": [
+    { "id": "catalogo", "label": "Catalogo prodotti", "file": "index.html", "permission": "studio.vedi" }
+  ]
+}

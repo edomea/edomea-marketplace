@@ -14,7 +14,7 @@ Una cartella che contiene solo il `README.md` è un plugin **previsto ma non anc
 | Plugin | Funzione | Deriva da (Edomea) | Stato |
 |---|---|---|---|
 | [emp-esempio](emp-esempio/) | Plugin dimostrativo della struttura | — | Esempio, non per la produzione |
-| [emp-studio](emp-studio/) | Catalogo prodotti: anagrafica, EAN, varianti, prezzi, modifica massiva | edomea-view-edit, edomea-shop-manager | Previsto (P0) |
+| [emp-studio](emp-studio/) | Catalogo prodotti: schede, EAN, famiglie e caratteristiche, foto/video/PDF, varianti, completezza | edomea-view-edit, edomea-shop-manager | **0.1.0** (in sviluppo) |
 | [emp-magazzino](emp-magazzino/) | Giacenze, movimenti, carichi, inventari, multi-negozio | edomea-magazzino | Previsto (P0) ⚠️ |
 | [emp-pos](emp-pos/) | Cassa e vendite al banco, documenti, consegne | edomea-pos | Previsto (P0) |
 | [emp-scontrino](emp-scontrino/) | Registratore telematico e scontrini | edomea-scontrino | Previsto (P0) |

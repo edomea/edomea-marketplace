@@ -208,6 +208,25 @@ jobs:
           test ! -e /etc/emp/avvio.conf
           curl -fsS --cacert "$CA" "$B/api/v1/salute" | jq -e '.avvio_sicuro == false' >/dev/null
           curl -fsS --cacert "$CA" "$B/api/v1/esempio" | grep -q '"modulo":"emp-esempio"'
+          # EMP Studio dal catalogo: pagina nel menu, schede, foto servite da /m-file/, permessi.
+          trap 'echo "FALLITO alla riga $LINENO: $BASH_COMMAND" >&2; sudo tail -n 20 /var/log/nginx/emp-errori.log >&2; sudo ls -la /var/lib/emp/moduli/emp-studio /var/lib/emp/moduli/emp-studio/public >&2 || true' ERR
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/emp-studio/installa" | jq -e .ok >/dev/null
+          curl -fsS --cacert "$CA" "$B/m/emp-studio/index.html" | grep 'data-voce="emp-studio:catalogo"' >/dev/null
+          test "$(code --cacert "$CA" "$B/m/emp-studio/../emp-module.json")" != 200
+          test "$(code -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/studio/prodotti")" = 403
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/utenti" \
+            -d '{"username":"admin.ci","nome":"Admin CI","password":"Temporanea-Admin-CI","ruolo":"amministratore"}' | jq -e '.utente.ruolo == "amministratore"' >/dev/null
+          curl -fsS -c "$RUNNER_TEMP/aj" "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"admin.ci","password":"Temporanea-Admin-CI"}' >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/aj" -c "$RUNNER_TEMP/aj" "${J[@]}" -X POST "$B/api/v1/accesso/password" -d '{"attuale":"Temporanea-Admin-CI","nuova":"Definitiva-Admin-CI-1"}' | jq -e .ok >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/aj" --cacert "$CA" "$B/api/v1/menu" | jq -e '.pagine[0].href == "/m/emp-studio/index.html"' >/dev/null
+          PID=$(curl -fsS -b "$RUNNER_TEMP/aj" "${J[@]}" -X POST "$B/api/v1/studio/prodotti" \
+            -d '{"nome":"Lavatrice CI","ean":"8001234567897","famiglia_id":"00000000-0000-4000-9000-000000000002"}' | jq -er .id)
+          python3 -c "import struct,zlib;c=lambda t,d:struct.pack('>I',len(d))+t+d+struct.pack('>I',zlib.crc32(t+d));open('$RUNNER_TEMP/f.png','wb').write(b'\x89PNG\r\n\x1a\n'+c(b'IHDR',struct.pack('>IIBBBBB',1,1,8,2,0,0,0))+c(b'IDAT',zlib.compress(b'\x00\xff\x00\x00'))+c(b'IEND',b''))"
+          curl -fsS -b "$RUNNER_TEMP/aj" --cacert "$CA" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: image/png' --data-binary "@$RUNNER_TEMP/f.png" "$B/api/v1/studio/media?prodotto=$PID" | jq -e .ok >/dev/null
+          FOTO=$(curl -fsS -b "$RUNNER_TEMP/aj" --cacert "$CA" "$B/api/v1/studio/prodotti/$PID" | jq -er '.media[0].url')
+          sudo test -f "/var/lib/emp/dati-moduli/emp-studio/pubblico/${FOTO#/m-file/emp-studio/}"
+          curl -fsS --cacert "$CA" -D - -o /dev/null "$B$FOTO" | grep -i 'content-type: image/png' >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/aj" --cacert "$CA" "$B/api/v1/studio/cerca?codice=8001234567897" | jq -e --arg id "$PID" '.id == $id' >/dev/null
           # Sorgente GitHub: disattivata di predefinito.
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin/github" | grep -q '"attiva":false'
           test "$(code -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin/github/release")" = 409

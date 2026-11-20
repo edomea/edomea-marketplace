@@ -26,6 +26,7 @@ final class Manifest
      * @param array<string, Constraint> $requires
      * @param array<string, string> $autoload namespace => cartella relativa
      * @param list<string> $permissions
+     * @param list<array{id: string, label: string, file: string, permission: string}> $pages pagine del plugin nel menu
      */
     private function __construct(
         public readonly string $id,
@@ -41,6 +42,7 @@ final class Manifest
         public readonly ?string $migrations,
         public readonly array $permissions,
         public readonly string $directory,
+        public readonly array $pages = [],
     ) {
     }
 
@@ -82,7 +84,7 @@ final class Manifest
             throw new ManifestException('Il manifest deve essere un oggetto JSON');
         }
 
-        $allowed = ['schema', 'id', 'name', 'version', 'type', 'description', 'php', 'requires', 'class', 'autoload', 'table_prefix', 'migrations', 'permissions'];
+        $allowed = ['schema', 'id', 'name', 'version', 'type', 'description', 'php', 'requires', 'class', 'autoload', 'table_prefix', 'migrations', 'permissions', 'pages'];
         $unknown = array_diff(array_keys($data), $allowed);
         if ($unknown !== []) {
             throw new ManifestException('Campi sconosciuti: ' . implode(', ', $unknown));
@@ -176,6 +178,23 @@ final class Manifest
             }
         }
 
+        // Pagine del plugin (cartella public/, servite in /m/<id>/): voce di menu e permesso per vederla.
+        $pages = $data['pages'] ?? [];
+        if (!is_array($pages) || !array_is_list($pages) || count($pages) > 10) {
+            throw new ManifestException('"pages" deve essere una lista (massimo 10)');
+        }
+        $pageList = [];
+        foreach ($pages as $pg) {
+            if (!is_array($pg) || array_diff(array_keys($pg), ['id', 'label', 'file', 'permission']) !== []
+                || !is_string($pg['id'] ?? null) || !preg_match('/^[a-z][a-z0-9-]{1,31}$/', $pg['id'])
+                || !is_string($pg['label'] ?? null) || $pg['label'] === '' || mb_strlen($pg['label']) > 40
+                || !is_string($pg['file'] ?? null) || !preg_match('/^[a-z0-9][a-z0-9-]{0,40}\.html$/', $pg['file'])
+                || !is_string($pg['permission'] ?? null) || !in_array($pg['permission'], $permissions, true)) {
+                throw new ManifestException('Voce "pages" non valida (id, label, file .html, permission tra quelli dichiarati)');
+            }
+            $pageList[] = ['id' => $pg['id'], 'label' => $pg['label'], 'file' => $pg['file'], 'permission' => $pg['permission']];
+        }
+
         $description = $data['description'] ?? '';
         if (!is_string($description) || mb_strlen($description) > 500) {
             throw new ManifestException('"description" non valida');
@@ -195,6 +214,7 @@ final class Manifest
             $migrations,
             array_values(array_unique($permissions)),
             $directory,
+            $pageList,
         );
     }
 

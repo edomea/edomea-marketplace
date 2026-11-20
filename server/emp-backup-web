@@ -48,6 +48,7 @@ final class Worker
     private string $authDir;
     private string $remoteConf;
     private bool $useSystemd;
+    private bool $stateFresh = false;
     /** @var array<string, mixed>|null */
     private ?array $job = null;
     private float $jobWritten = 0.0;
@@ -95,7 +96,9 @@ final class Worker
                 $this->process($file);
             }
         }
-        $this->writeState();
+        if (!$this->stateFresh) {
+            $this->writeState();
+        }
 
         return 0;
     }
@@ -137,6 +140,9 @@ final class Worker
         $user = $request['utente'];
         try {
             $result = $this->dispatch($id, $action, $user, $request);
+            // Stato aggiornato PRIMA dell'esito: chi legge l'esito e poi lo stato vede già il risultato.
+            $this->writeState();
+            $this->stateFresh = true;
             $this->respond($id, $user, $action, true, $result['messaggio'], $result['dati'] ?? []);
         } catch (Failure $e) {
             $this->respond($id, $user, $action, false, $e->getMessage());

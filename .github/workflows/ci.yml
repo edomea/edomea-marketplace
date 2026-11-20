@@ -155,6 +155,14 @@ jobs:
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/utenti" \
             -d '{"username":"cassa.ci","nome":"Cassa CI","password":"Temporanea-Cassa-CI","ruolo":"operatore","ruoli":["cassiere"]}' | jq -e '.utente.ruolo == "operatore"' >/dev/null
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/utenti" | jq -e '.utenti[] | select(.username == "cassa.ci") | .ruoli == ["cassiere"]' >/dev/null
+          # Email SMTP: configurazione con la password del Tecnico, prova verso un server che non c'è.
+          curl -fsS --cacert "$CA" -o /dev/null "$B/techadmin/email.html"
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/email" | jq -e '.email.attiva == false' >/dev/null
+          test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/email" -d '{"host":"127.0.0.1","porta":2525,"sicurezza":"nessuna","mittente":"ci@example.com","password_tecnico":"sbagliata"}')" = 403
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/email" \
+            -d '{"attiva":true,"host":"127.0.0.1","porta":2525,"sicurezza":"nessuna","utente":"","mittente":"ci@example.com","password_tecnico":"Chiave-Sicura-CI-2026"}' | jq -e '.email.attiva' >/dev/null
+          test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/email/prova" -d '{"a":"ci@example.com"}')" = 422
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/email" | jq -e '.email.ultimo_test.esito == "errore" and (.email | has("password") | not)' >/dev/null
           # Profilo del Tecnico: visibile, modificabile solo con la password.
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/accesso/profilo" | jq -e '.profilo.username == "tecnico" and .profilo.sessioni_aperte >= 1' >/dev/null
           test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/profilo" -d '{"nome":"X","username":"tecnico","password":"sbagliata"}')" = 403

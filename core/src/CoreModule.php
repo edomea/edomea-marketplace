@@ -12,6 +12,7 @@ use Emp\Core\Access\WorkstationService;
 use Emp\Core\Backup\BackupRoutes;
 use Emp\Core\Brand\BrandException;
 use Emp\Core\Brand\BrandService;
+use Emp\Core\Mail\MailException;
 use Emp\Core\Http\AdminGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
@@ -82,6 +83,12 @@ use Emp\Core\Plugin\PackageException;
  *   POST /api/v1/postazioni/{id}/rinomina      {nome}
  *   POST /api/v1/postazioni/{id}/revoca        chiude anche le sessioni aperte da lì
  *   POST /api/v1/postazioni/obbligo            {attivo}: operatori solo dalle postazioni autorizzate
+ *
+ * Email in uscita (SMTP) — solo Tecnico, solo HTTPS
+ *   GET  /api/v1/email                         configurazione (mai la password)
+ *   POST /api/v1/email                         {attiva, host, porta, sicurezza, utente, password?, mittente, nome_mittente, rispondi_a, password_tecnico}
+ *   POST /api/v1/email/prova                   {a}: email di prova
+ *   POST /api/v1/email/rimuovi                 {password_tecnico}
  *
  * Marchio white label (lettura pubblica: serve anche alle pagine di accesso)
  *   GET  /api/v1/marchio                       {nome, colore, logo: impronta|null}
@@ -220,6 +227,37 @@ final class CoreModule implements ModuleInterface
             return Response::json(['ok' => true, 'messaggio' => $on
                 ? 'Da ora gli operatori accedono solo dalle postazioni autorizzate.'
                 : 'Gli operatori possono accedere da qualsiasi postazione.']);
+        }));
+
+        // ---- Email in uscita (SMTP) -------------------------------------------------------
+        $mailAction = static fn (Request $q, bool $confirm, \Closure $fn): Response => AdminGuard::check($q) ?? self::run(static function () use ($access, $q, $fn, $confirm): Response {
+            $user = self::requireUser($access(), $q, false, Role::TECNICO);
+            if ($confirm) {
+                // Cambiare il server di posta o i suoi dati di accesso: serve la password del Tecnico.
+                $access()->confirmPassword($user, $q->input('password_tecnico'), $q->remoteAddr, 'email');
+            }
+            try {
+                return $fn($user);
+            } catch (MailException $e) {
+                return Response::error(422, $e->getMessage());
+            }
+        });
+        $r->add('GET', '/api/v1/email', $id, static fn (Request $q): Response => $mailAction($q, false,
+            static fn (): Response => Response::json(['email' => $kernel->mailer()->config()])));
+        $r->add('POST', '/api/v1/email', $id, static fn (Request $q): Response => $mailAction($q, true, static function (User $u) use ($q, $kernel): Response {
+            $kernel->mailer()->save($u->username, $q->json());
+
+            return Response::json(['ok' => true, 'email' => $kernel->mailer()->config(), 'messaggio' => 'Configurazione email salvata.']);
+        }));
+        $r->add('POST', '/api/v1/email/prova', $id, static fn (Request $q): Response => $mailAction($q, false, static function (User $u) use ($q, $kernel): Response {
+            $log = $kernel->mailer()->test($u->username, $q->input('a'));
+
+            return Response::json(['ok' => true, 'messaggio' => 'Email di prova inviata a ' . $q->input('a') . '. Controlla la posta (anche lo spam).', 'dialogo' => $log]);
+        }));
+        $r->add('POST', '/api/v1/email/rimuovi', $id, static fn (Request $q): Response => $mailAction($q, true, static function (User $u) use ($kernel): Response {
+            $kernel->mailer()->remove($u->username);
+
+            return Response::json(['ok' => true, 'messaggio' => 'Configurazione email cancellata.']);
         }));
 
         // ---- Marchio white label --------------------------------------------------------

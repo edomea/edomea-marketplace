@@ -20,6 +20,7 @@ const EMP_MENU = {
       { id: "ruoli", label: "Ruoli e permessi", href: "/techadmin/#ruoli" },
       { id: "backup", label: "Backup", href: "/techadmin/backup.html" },
       { id: "sistema", label: "Sistema", href: "/techadmin/sistema.html" },
+      { id: "email", label: "Email (SMTP)", href: "/techadmin/email.html" },
       { id: "plugin", label: "Plugin", href: "/techadmin/plugin.html" },
       { id: "marchio", label: "Marchio", href: "/techadmin/marchio.html" },
     ],

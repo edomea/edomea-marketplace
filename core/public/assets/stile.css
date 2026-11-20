@@ -142,3 +142,5 @@ body.con-menu .emp-contenuto main { margin: 0; max-width: 1100px; }
   .emp-menu li a { padding: 6px 10px; }
 }
 tr.riga-tu td { background: #f6f9fa; }
+label.spunta { display: flex; align-items: center; gap: 8px; font-weight: 600; margin: 8px 0; }
+label.spunta input { width: auto; margin: 0; display: inline; }

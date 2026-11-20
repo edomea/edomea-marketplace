@@ -1120,7 +1120,8 @@ cmd_ripristina() {
     fi
     ( cd "$work" && sha256sum --quiet --strict -c SHA256SUMS ) || die "backup danneggiato o modificato (SHA256SUMS)"
     [[ $(manifest_field "$work" formato) == "$BACKUP_FORMAT" ]] || die "formato del backup non supportato"
-    if tar -tzf "$work/dati.tar.gz" | grep -Ev '^(moduli|catalogo|catalogo-locale)(/|$)' | grep -q .; then
+    # Elenco letto per intero: con "| grep -q" e pipefail il SIGPIPE renderebbe falso il controllo.
+    if tar -tzf "$work/dati.tar.gz" | grep -Ev '^(moduli|catalogo|catalogo-locale)(/|$)' | grep . >/dev/null; then
         die "il backup contiene percorsi non ammessi"
     fi
 

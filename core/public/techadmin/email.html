@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'">
+<title>Email — EMP</title>
+<link rel="stylesheet" href="/assets/stile.css">
+<script defer src="/assets/comune.js"></script>
+<script defer src="email.js"></script>
+</head>
+<body data-shell="techadmin" data-voce="email">
+<header class="emp-header">
+  <strong>EMP — Email</strong>
+  <span id="user-badge"></span>
+</header>
+<main>
+  <div id="non-disponibile" class="box err" hidden></div>
+
+  <div id="contenuto" hidden>
+    <section class="schede">
+      <div class="scheda"><span class="etichetta">Invio email</span><strong id="stato">—</strong><span id="stato-dettaglio" class="note"></span></div>
+      <div class="scheda"><span class="etichetta">Ultima prova</span><strong id="prova">—</strong><span id="prova-dettaglio" class="note"></span></div>
+    </section>
+
+    <section class="box">
+      <h2>Server di posta in uscita (SMTP)</h2>
+      <p class="note">EMP usa la posta per avvisi e, con i plugin, per documenti e comunicazioni ai clienti. Senza email EMP funziona lo stesso.
+        Esempi: Gmail <code>smtp.gmail.com</code> porta 587 STARTTLS (con una "password per le app"), Aruba <code>smtps.aruba.it</code>
+        porta 465 SSL/TLS.</p>
+      <form id="smtp" novalidate>
+        <div class="griglia-campi">
+          <label>Server SMTP <input name="host" autocomplete="off" spellcheck="false" placeholder="smtp.esempio.it" required></label>
+          <label>Porta <input name="porta" type="number" min="1" max="65535" value="587" required></label>
+          <label>Sicurezza
+            <select name="sicurezza">
+              <option value="starttls">STARTTLS (di solito porta 587)</option>
+              <option value="ssl">SSL/TLS (di solito porta 465)</option>
+              <option value="nessuna">Nessuna (solo server interni)</option>
+            </select></label>
+          <label>Utente <input name="utente" autocomplete="off" spellcheck="false" placeholder="di solito l'indirizzo email"></label>
+          <label>Password SMTP <input name="password" type="password" autocomplete="new-password" placeholder="">
+            <span class="note" id="password-nota"></span></label>
+          <label>Mittente <input name="mittente" type="email" autocomplete="off" spellcheck="false" placeholder="negozio@esempio.it" required></label>
+          <label>Nome del mittente <input name="nome_mittente" maxlength="80" autocomplete="off" placeholder="es. Edomea"></label>
+          <label>Rispondi a (facoltativo) <input name="rispondi_a" type="email" autocomplete="off" spellcheck="false"></label>
+        </div>
+        <label class="spunta"><input type="checkbox" name="attiva"> Invio email attivo</label>
+        <input name="username" type="text" autocomplete="username" hidden>
+        <label>La tua password di EMP (per confermare) <input name="password_tecnico" type="password" autocomplete="current-password" required></label>
+        <p class="riga-azioni">
+          <button type="submit">Salva</button>
+          <button type="button" id="rimuovi" class="secondario pericolo">Cancella la configurazione</button>
+        </p>
+      </form>
+    </section>
+
+    <section class="box">
+      <h2>Email di prova</h2>
+      <form id="prova-form" class="riga" novalidate>
+        <label>Invia a <input name="a" type="email" autocomplete="email" required></label>
+        <button type="submit">Invia la prova</button>
+      </form>
+      <details id="dialogo-box" hidden><summary>Dialogo con il server</summary><pre id="dialogo" class="registro"></pre></details>
+    </section>
+  </div>
+</main>
+<div id="toast" role="status" aria-live="polite" hidden></div>
+</body>
+</html>

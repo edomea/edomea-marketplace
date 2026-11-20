@@ -4,7 +4,7 @@
 
 Edomea Marketplace è una piattaforma commerciale open source, multicanale e multipiattaforma, distribuita come **software white label**: ogni azienda può adottarla e presentarla con il proprio nome, logo, colori e domini, usando lo stesso Core e gli stessi moduli.
 
-Il progetto è in fase iniziale di sviluppo: EMP Server 0.6.0-alpha.20 e Core 0.1.17 sono versioni di laboratorio, non pronte per la produzione.
+Il progetto è in fase iniziale di sviluppo: EMP Server 0.6.0-alpha.21 e Core 0.1.18 sono versioni di laboratorio, non pronte per la produzione.
 
 ## Componenti
 

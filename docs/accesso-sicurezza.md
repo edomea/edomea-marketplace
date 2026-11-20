@@ -81,6 +81,13 @@ Le postazioni sono i browser dei PC e dei tablet del negozio. Una postazione aut
 - **Revoca:** il token non vale più e le sessioni aperte da quella postazione si chiudono subito.
 - In fondo a ogni pagina compare il nome della postazione in uso. Ogni operazione è tracciata.
 
+## 5.1.2 Email in uscita (SMTP)
+
+Pagina **Email (SMTP)** di /techadmin (solo Tecnico, solo HTTPS): server, porta, sicurezza (STARTTLS, SSL/TLS o nessuna, solo per server interni), utente e password SMTP, mittente, nome del mittente, "Rispondi a", invio attivo sì/no.
+- Salvare o cancellare la configurazione richiede la password del Tecnico. La password SMTP non esce mai dalle API (resta nel database, quindi nei backup cifrati); lasciando il campo vuoto si conserva quella salvata.
+- Il certificato del server di posta è sempre verificato. **Email di prova** con il dialogo SMTP (senza credenziali) e l'esito dell'ultima prova.
+- Per i plugin: `$kernel->mailer()->send([...], 'Oggetto', 'Testo')`. EMP funziona anche senza email.
+
 ## 5.2 Marchio white label
 
 Il Tecnico sceglie dalla pagina **Marchio** di /techadmin (solo in HTTPS) il nome dell'attività, il colore principale e il logo, che compaiono in tutte le pagine di /admin e /techadmin (intestazione e titolo della scheda), anche in quelle di accesso.

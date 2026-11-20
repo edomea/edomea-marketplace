@@ -9,6 +9,7 @@ use Emp\Core\Access\JobRoleService;
 use Emp\Core\Access\WorkstationService;
 use Emp\Core\Backup\BackupBridge;
 use Emp\Core\Brand\BrandService;
+use Emp\Core\Mail\MailService;
 use Emp\Core\Http\CsrfGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
@@ -195,6 +196,12 @@ final class Kernel
     public function backup(): ?BackupBridge
     {
         return $this->backupWebDir !== null ? new BackupBridge($this->backupWebDir) : null;
+    }
+
+    /** Posta in uscita (SMTP) configurata dal Tecnico: per il Core e i plugin. */
+    public function mailer(?\Closure $connector = null): MailService
+    {
+        return new MailService($this->installer->pdo(), $this->installer->tablePrefix('core_'), $this->clock, $connector);
     }
 
     /** Marchio white label (nome, colore, logo) mostrato nelle pagine. */

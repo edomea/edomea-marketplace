@@ -797,8 +797,12 @@ cmd_backup() {
 cmd_backup_elenco() {
     require_root backup-elenco
     if [[ ${1:-} == --tsv ]]; then
-        # Per la pagina Backup: origine, nome, byte, data (secondi dal 1970), dal più recente.
-        find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf 'locale\t%f\t%s\t%T@\n' 2>/dev/null | sort -t$'\t' -k4,4nr
+        # Per la pagina Backup: origine, nome, byte, data (secondi dal 1970), cifrato (1/0), dal più recente.
+        local kind name size mtime
+        find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf 'locale\t%f\t%s\t%T@\n' 2>/dev/null | sort -t$'\t' -k4,4nr \
+            | while IFS=$'\t' read -r kind name size mtime; do
+                printf '%s\t%s\t%s\t%s\t%s\n' "$kind" "$name" "$size" "$mtime" "$(is_encrypted_backup "$EMP_BACKUP/$name" && echo 1 || echo 0)"
+            done
         if remote_configured; then
             local list
             if list=$(rclone_emp lsjson emp-cifrato: --files-only 2>/dev/null); then

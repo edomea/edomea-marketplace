@@ -70,3 +70,34 @@ fieldset.scelta { border: 0; padding: 0; margin: 6px 0; display: flex; gap: 18px
 fieldset.scelta label.spunta { display: inline-flex; align-items: center; margin: 0; }
 fieldset.scelta label.spunta input { width: auto; margin: 0 6px 0 0; }
 section.box h4 { margin: 14px 0 6px; }
+
+/* Pagina Backup: riepilogo a schede, elenco unico, impostazioni richiudibili */
+.schede { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin: 4px 0 12px; }
+.scheda { background: #fff; border: 1px solid var(--emp-bordo); border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 4px; }
+.scheda .etichetta { font-size: 13px; color: var(--emp-tenue); text-transform: uppercase; letter-spacing: .04em; }
+.scheda strong { font-size: 17px; }
+.scheda.ok { border-left: 4px solid var(--emp-ok); }
+.scheda.ko { border-left: 4px solid var(--emp-errore); }
+.scheda.neutra { border-left: 4px solid var(--emp-bordo); }
+.centrata { align-self: center; }
+section.box h2, details.box h2 { font-size: 18px; margin: 4px 0 10px; }
+table.elenco-backup td { vertical-align: middle; }
+table.elenco-backup td small { margin-top: 2px; font-size: 12px; overflow-wrap: anywhere; }
+table.elenco-backup td:last-child { text-align: right; white-space: nowrap; }
+.etichetta-dove { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; margin-right: 4px;
+  background: #e6eef1; color: var(--emp-testo); }
+button.piccolo { padding: 5px 10px; font-size: 14px; }
+button.pericolo { background: #fff; color: var(--emp-errore); border: 1px solid var(--emp-errore); }
+details.impostazioni > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: 12px; }
+details.impostazioni > summary::-webkit-details-marker { display: none; }
+details.impostazioni > summary h2 { margin: 4px 0; }
+details.impostazioni > summary::before { content: "▸"; color: var(--emp-tenue); }
+details.impostazioni[open] > summary::before { content: "▾"; }
+details.impostazioni h3 { margin: 22px 0 8px; padding-top: 14px; border-top: 1px solid var(--emp-bordo); }
+form.griglia { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px 16px; align-items: end; }
+form.griglia label { margin: 0; }
+form.griglia label.spunta { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+form.griglia label.spunta input { width: auto; margin: 0; }
+form.griglia p { margin: 0; }
+table.elenco-backup td:first-child { white-space: nowrap; }
+#lavoro p { margin: 4px 0 6px; }

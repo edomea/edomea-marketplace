@@ -668,8 +668,9 @@ final class Worker
         [$rc, $out] = $this->runQuiet(['backup-elenco', '--tsv']);
         foreach ($rc === 0 ? explode("\n", $out) : [] as $line) {
             $f = explode("\t", $line);
-            if ($f[0] === 'locale' && count($f) === 4 && preg_match(NAME_PATTERN, $f[1])) {
-                $local[] = ['nome' => $f[1], 'byte' => (int) $f[2], 'data' => date(DATE_ATOM, (int) $f[3])];
+            if ($f[0] === 'locale' && (count($f) === 4 || count($f) === 5) && preg_match(NAME_PATTERN, $f[1])) {
+                $local[] = ['nome' => $f[1], 'byte' => (int) $f[2], 'data' => date(DATE_ATOM, (int) $f[3]),
+                    'cifrato' => isset($f[4]) ? $f[4] === '1' : null];
             } elseif ($f[0] === 'remoto' && count($f) === 4 && preg_match(NAME_PATTERN, $f[1])) {
                 $remote[] = ['nome' => $f[1], 'byte' => (int) $f[2], 'data' => (int) $f[3] > 0 ? date(DATE_ATOM, (int) $f[3]) : null];
             } elseif ($f[0] === 'destinazione' && count($f) === 3) {

@@ -16,66 +16,71 @@
 </header>
 <main>
   <p><a href="index.html">← Amministratore Tecnico</a></p>
-  <p class="intro">
-    Il backup contiene <strong>tutto EMP e solo EMP</strong>: database, Core, plugin, cataloghi e il pacchetto della versione
-    di EMP Server in uso. Non contiene ciò che appartiene alla macchina (nome, certificato HTTPS, collegamento a GitHub e a questa
-    destinazione remota). Prima di ogni aggiornamento di EMP Server il backup si fa da solo.
-    Tutti i backup, su questa macchina e sulla destinazione remota, sono <strong>cifrati con la chiave dei backup</strong>.
-  </p>
-  <p class="note">Funzione riservata all'Amministratore Tecnico, disponibile solo con l'indirizzo https://.</p>
 
   <div id="non-disponibile" class="box err" hidden></div>
 
   <div id="contenuto" hidden>
-    <!-- Stato e backup immediato -->
+    <!-- 1. Riepilogo -->
+    <section class="schede">
+      <div class="scheda"><span class="etichetta">Ultimo backup</span><strong id="ultimo">—</strong><span id="ultimo-dettaglio" class="note"></span></div>
+      <div class="scheda"><span class="etichetta">Prossimo backup automatico</span><strong id="prossimo">—</strong><span id="prossimo-dettaglio" class="note"></span></div>
+      <div class="scheda"><span class="etichetta">Copia remota</span><strong id="remota">—</strong><span id="remota-dettaglio" class="note"></span></div>
+      <div class="scheda"><span class="etichetta">Cifratura</span><strong id="cifratura">—</strong><span id="cifratura-dettaglio" class="note"></span></div>
+    </section>
+    <p class="riga-azioni">
+      <button type="button" id="esegui">Esegui un backup adesso</button>
+      <button type="button" id="aggiorna" class="secondario">Aggiorna</button>
+      <span id="aggiornato" class="note centrata"></span>
+    </p>
+    <div id="lavoro" class="box" hidden>
+      <p><strong id="lavoro-titolo"></strong> <span id="lavoro-stato" class="stato"></span></p>
+      <details id="lavoro-dettagli"><summary>Dettaglio dell'operazione</summary><pre id="lavoro-righe" class="registro"></pre></details>
+    </div>
+
+    <!-- 2. Elenco unico dei backup -->
     <section class="box">
-      <h3>Stato</h3>
-      <table class="dettagli">
-        <tbody>
-          <tr><th>Ultimo backup</th><td id="ultimo">—</td></tr>
-          <tr><th>Prossimo backup automatico</th><td id="prossimo">—</td></tr>
-          <tr><th>Copia remota cifrata</th><td id="remota">—</td></tr>
-          <tr><th>Dati aggiornati</th><td id="aggiornato">—</td></tr>
-        </tbody>
+      <h2>Backup disponibili</h2>
+      <table id="elenco" class="elenco-backup">
+        <thead><tr><th>Data</th><th>Tipo</th><th>Dove</th><th>Dimensione</th><th></th></tr></thead>
+        <tbody></tbody>
       </table>
-      <p>
-        <button type="button" id="esegui">Esegui un backup adesso</button>
-        <button type="button" id="aggiorna" class="secondario">Aggiorna</button>
-      </p>
-      <div id="lavoro" hidden>
-        <p><strong id="lavoro-titolo"></strong> <span id="lavoro-stato" class="stato"></span></p>
-        <pre id="lavoro-righe" class="registro"></pre>
-      </div>
+      <p class="note">Il <strong>ripristino</strong> rimette EMP com'era nel backup (prima salva lo stato attuale); poi si accede con la
+        password valida in quel momento. Il file <strong>scaricato</strong> è cifrato con la chiave dei backup.</p>
     </section>
 
-    <!-- Pianificazione e conservazione -->
-    <section class="box">
+    <!-- 3. Impostazioni -->
+    <details class="box impostazioni" id="impostazioni-box">
+      <summary><h2>Impostazioni</h2><span class="note">orario, quanti backup tenere, destinazione remota, chiave</span></summary>
+
       <h3>Pianificazione e conservazione</h3>
-      <form id="impostazioni" class="riga" novalidate>
+      <form id="impostazioni" class="griglia" novalidate>
         <label class="spunta"><input type="checkbox" id="notturno"> Backup automatico ogni notte</label>
         <label>Orario <input type="time" id="ora" required></label>
-        <label>Backup da conservare su questa macchina <input type="number" id="conserva-locali" min="1" max="90" required></label>
-        <label>Backup da conservare sulla destinazione remota <input type="number" id="conserva-remoti" min="1" max="365" required></label>
-        <button type="submit">Salva</button>
+        <label>Backup da tenere su questo server <input type="number" id="conserva-locali" min="1" max="90" required></label>
+        <label>Backup da tenere sulla destinazione remota <input type="number" id="conserva-remoti" min="1" max="365" required></label>
+        <p><button type="submit">Salva</button></p>
       </form>
-      <p class="note">I backup più vecchi oltre questi numeri vengono cancellati a ogni nuovo backup. Sulla destinazione remota
-        si contano solo quelli di questo server.</p>
-    </section>
+      <p class="note">A ogni nuovo backup si cancellano i più vecchi oltre questi numeri (sulla destinazione remota, solo quelli di questo server).</p>
 
-    <!-- Destinazione remota -->
-    <section class="box">
-      <h3>Copia remota cifrata</h3>
-      <p class="note">Ogni backup viene copiato anche sulla destinazione remota, cifrato con la stessa <strong>chiave dei backup</strong>.
-        Senza la chiave i backup non si possono aprire: va conservata fuori da questa macchina.</p>
-      <p id="dest-attuale"></p>
-      <ul id="dest-dettagli" class="note" hidden></ul>
-      <p><button type="button" id="mostra-chiave" class="secondario">Mostra la chiave dei backup</button>
-        <span class="note">Una sola chiave per tutti i backup di questo server, anche senza destinazione remota.</span></p>
+      <h3>Destinazione remota</h3>
+      <table class="dettagli" id="dest-tabella">
+        <tbody>
+          <tr><th>Destinazione</th><td id="dest-attuale">—</td></tr>
+          <tr id="dest-riga-account" hidden><th>Account Google</th><td id="dest-account"></td></tr>
+          <tr id="dest-riga-dal" hidden><th>Collegata dal</th><td id="dest-dal"></td></tr>
+          <tr id="dest-riga-client" hidden><th>Client Google</th><td id="dest-client"></td></tr>
+        </tbody>
+      </table>
       <div id="dest-azioni" class="riga-azioni" hidden>
         <button type="button" id="ricollega" class="secondario" hidden>Cambia account / Ricollega</button>
         <button type="button" id="cambia-dest" class="secondario">Cambia destinazione</button>
-        <button type="button" id="scollega" class="secondario">Scollega</button>
+        <button type="button" id="scollega" class="secondario pericolo">Scollega</button>
       </div>
+
+      <h3>Chiave dei backup</h3>
+      <p class="note">Una sola chiave cifra tutti i backup di questo server, sul server e sulla destinazione remota. Senza la chiave non si
+        possono ripristinare su un'altra macchina: conservala fuori da qui (gestore di password, foglio in cassaforte).</p>
+      <p><button type="button" id="mostra-chiave" class="secondario">Mostra la chiave dei backup</button></p>
       <div id="conferma-box" class="box" hidden></div>
       <div id="chiave-box" class="box" hidden></div>
 
@@ -130,26 +135,15 @@
           <button type="button" id="google-annulla" class="secondario">Annulla</button>
         </form>
       </div>
-    </section>
 
-    <!-- Elenco dei backup -->
-    <section class="box">
-      <h3>Backup su questa macchina</h3>
-      <table id="locali">
-        <thead><tr><th>Backup</th><th>Data</th><th>Dimensione</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <h3 id="remoti-titolo">Backup sulla destinazione remota</h3>
-      <table id="remoti">
-        <thead><tr><th>Backup</th><th>Data</th><th>Dimensione</th><th></th></tr></thead>
-        <tbody></tbody>
-      </table>
-      <p class="note">Il file scaricato è <strong>cifrato</strong> con la chiave dei backup, come quelli copiati via scp: per
-        ripristinarlo su un altro server serve la chiave (la pagina o <code>sudo emp-server ripristina FILE --chiave CHIAVE</code>).
-        Per una copia in chiaro, sul Server: <code>sudo emp-server backup-decifra FILE USCITA</code>.
-        Il <strong>ripristino</strong> sostituisce database, Core, plugin e cataloghi con quelli del backup (prima salva lo stato attuale);
-        dopo il ripristino si accede con la password valida al momento del backup.</p>
-    </section>
+      <details class="note">
+        <summary>Cosa contiene il backup</summary>
+        <p>Tutto EMP e solo EMP: database, Core, plugin, cataloghi e il pacchetto della versione di EMP Server in uso. Non contiene ciò
+          che appartiene alla macchina (nome, certificato HTTPS, collegamento a GitHub e alla destinazione remota). Prima di ogni
+          aggiornamento di EMP Server il backup si fa da solo. Da console: <code>sudo emp-server backup-decifra FILE USCITA</code> crea
+          una copia in chiaro, <code>sudo emp-server ripristina FILE --chiave CHIAVE</code> ripristina il backup di un altro server.</p>
+      </details>
+    </details>
   </div>
 </main>
 <div id="toast" role="status" aria-live="polite" hidden></div>

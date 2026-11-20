@@ -21,6 +21,8 @@ final class Request
         public readonly string $body = '',
         public readonly array $params = [],
         private readonly string $inputUri = 'php://input',
+        /** @var array<string, string> parametri dell'indirizzo (?q=…), solo valori semplici */
+        public readonly array $query = [],
     ) {
     }
 
@@ -64,6 +66,9 @@ final class Request
             $headers,
             (string) ($_SERVER['REMOTE_ADDR'] ?? ''),
             $body,
+            [],
+            'php://input',
+            array_filter(array_map(static fn ($v): ?string => is_string($v) ? mb_substr($v, 0, 500) : null, $_GET), static fn ($v): bool => $v !== null),
         );
     }
 
@@ -121,6 +126,6 @@ final class Request
     /** @param array<string, string> $params */
     public function withParams(array $params): self
     {
-        return new self($this->method, $this->path, $this->headers, $this->remoteAddr, $this->body, $params, $this->inputUri);
+        return new self($this->method, $this->path, $this->headers, $this->remoteAddr, $this->body, $params, $this->inputUri, $this->query);
     }
 }

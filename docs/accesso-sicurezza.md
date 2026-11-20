@@ -88,6 +88,11 @@ Pagina **Email (SMTP)** di /techadmin (solo Tecnico, solo HTTPS): server, porta,
 - Il certificato del server di posta è sempre verificato. **Email di prova** con il dialogo SMTP (senza credenziali) e l'esito dell'ultima prova.
 - Per i plugin: `$kernel->mailer()->send([...], 'Oggetto', 'Testo')`. EMP funziona anche senza email.
 
+## 5.1.3 Pagine e permessi dei plugin
+Un plugin dichiara nel manifest i suoi permessi (`permissions`) e le sue pagine (`pages`: id, etichetta, file `.html`, permesso richiesto). La pagina è servita da Nginx in `/m/<id>/<file>` e compare nel menu laterale, nel gruppo **Funzioni**, solo a chi ha il permesso (`GET /api/v1/menu`). Le API del plugin controllano lo stesso permesso con `Api::user()`: la voce nascosta non è l'unica protezione.
+I file pubblici dei plugin (es. foto dei prodotti) stanno in `/var/lib/emp/dati-moduli/<id>/pubblico/`, serviti in `/m-file/<id>/` con `Content-Security-Policy: default-src 'none'` e `nosniff`; la cartella è inclusa nei backup cifrati.
+Gli amministratori operativi hanno tutti i permessi dei plugin; l'Amministratore Tecnico nessuno (gestisce il sistema, non i dati commerciali).
+
 ## 5.2 Marchio white label
 
 Il Tecnico sceglie dalla pagina **Marchio** di /techadmin (solo in HTTPS) il nome dell'attività, il colore principale e il logo, che compaiono in tutte le pagine di /admin e /techadmin (intestazione e titolo della scheda), anche in quelle di accesso.

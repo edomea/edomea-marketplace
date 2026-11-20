@@ -86,6 +86,9 @@ create_dirs() {
     # Catalogo locale del Core: plugin caricati a mano dal Tecnico o importati da una release GitHub.
     install -d -m 0750 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/catalogo-locale"
     install -d -m 0700 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/tmp"
+    # File dei plugin (dati-moduli/<id>/); la sottocartella "pubblico" di ogni plugin la serve Nginx
+    # in /m-file/<id>/ (es. foto dei prodotti), il resto resta privato.
+    install -d -m 0755 -o "$EMP_USER" -g "$EMP_USER" "$EMP_DATA/dati-moduli"
     # Backup e arrivi dei plugin raggiungibili via scp dagli utenti abilitati (gruppo emp-file).
     getent group "$EMP_SCP_GROUP" >/dev/null || groupadd --system "$EMP_SCP_GROUP"
     install -d -m 0750 -o root -g "$EMP_SCP_GROUP" "$EMP_BACKUP"
@@ -485,7 +488,8 @@ readonly BACKUP_FORMAT=1
 readonly EMP_PACKAGE_DIR=$EMP_DATA/pacchetto
 readonly REMOTE_DIR=$EMP_CONF_DIR/backup-remoto
 readonly REMOTE_CONF=$REMOTE_DIR/rclone.conf
-readonly EMP_DATA_DIRS="moduli catalogo catalogo-locale"
+# dati-moduli: file dei plugin (es. foto dei prodotti di EMP Studio), dalla 0.6.0-alpha.22.
+readonly EMP_DATA_DIRS="moduli catalogo catalogo-locale dati-moduli"
 
 # Cartelle temporanee rimosse all'uscita (niente trap RETURN: in Bash sono globali e si
 # sovrappongono quando una funzione ne chiama un'altra, es. il backup dentro il ripristino).
@@ -761,8 +765,11 @@ cmd_backup() {
     mariadb-dump --single-transaction --routines --events --triggers --hex-blob \
         --default-character-set=utf8mb4 emp | gzip -6 > "$work/database.sql.gz"
     gzip -t "$work/database.sql.gz" || die "esportazione del database non riuscita"
+    # Solo le cartelle che ci sono (es. dati-moduli prima del primo avvio della 0.6.0-alpha.22).
+    local present=() d
     # shellcheck disable=SC2086  # elenco fisso di cartelle
-    tar -C "$EMP_DATA" -czf "$work/dati.tar.gz" $EMP_DATA_DIRS
+    for d in $EMP_DATA_DIRS; do [[ -d $EMP_DATA/$d ]] && present+=("$d"); done
+    tar -C "$EMP_DATA" -czf "$work/dati.tar.gz" "${present[@]}"
     local package="emp-server-${server}.tar.gz"
     if [[ -f $EMP_PACKAGE_DIR/$package ]]; then
         cp "$EMP_PACKAGE_DIR/$package" "$work/$package"
@@ -1144,7 +1151,7 @@ cmd_ripristina() {
     ( cd "$work" && sha256sum --quiet --strict -c SHA256SUMS ) || die "backup danneggiato o modificato (SHA256SUMS)"
     [[ $(manifest_field "$work" formato) == "$BACKUP_FORMAT" ]] || die "formato del backup non supportato"
     # Elenco letto per intero: con "| grep -q" e pipefail il SIGPIPE renderebbe falso il controllo.
-    if tar -tzf "$work/dati.tar.gz" | grep -Ev '^(moduli|catalogo|catalogo-locale)(/|$)' | grep . >/dev/null; then
+    if tar -tzf "$work/dati.tar.gz" | grep -Ev '^(moduli|catalogo|catalogo-locale|dati-moduli)(/|$)' | grep . >/dev/null; then
         die "il backup contiene percorsi non ammessi"
     fi
 

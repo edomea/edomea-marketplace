@@ -83,12 +83,12 @@ final class PluginManagerTest extends TestCase
         $this->writeIndex([$this->esempio()]);
         $overview = $this->manager()->overview();
         self::assertTrue($overview['catalogo']);
-        self::assertSame('0.1.18', $overview['core']);
+        self::assertSame('0.1.19', $overview['core']);
         self::assertSame('installabile', $overview['plugin'][0]['stato']);
         self::assertSame(['emp-core' => '>=0.1.0 <0.2.0'], $overview['plugin'][0]['dipendenze']);
 
         $log = $this->manager()->install('emp-esempio', 'tecnico');
-        self::assertSame(['File di emp-esempio 0.1.0 estratti dal catalogo', 'emp-core 0.1.18 già installato', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
+        self::assertSame(['File di emp-esempio 0.1.0 estratti dal catalogo', 'emp-core 0.1.19 già installato', 'Installato emp-esempio 0.1.0 (1 migrazioni)'], $log);
         self::assertSame('installato', $this->manager()->overview()['plugin'][0]['stato']);
 
         $kernel = new Kernel($this->modules, $this->installer, new Clock(), $this->catalog);
@@ -106,7 +106,7 @@ final class PluginManagerTest extends TestCase
         $log = $this->manager()->install('emp-figlio', 'tecnico');
         self::assertSame('File di emp-base 0.1.0 estratti dal catalogo', $log[0]);
         self::assertSame('File di emp-figlio 0.1.0 estratti dal catalogo', $log[1]);
-        self::assertSame(['emp-base' => '0.1.0', 'emp-core' => '0.1.18', 'emp-figlio' => '0.1.0'], $this->installer->installed());
+        self::assertSame(['emp-base' => '0.1.0', 'emp-core' => '0.1.19', 'emp-figlio' => '0.1.0'], $this->installer->installed());
 
         try {
             $this->manager()->uninstall('emp-base', 'tecnico');
@@ -210,6 +210,6 @@ final class PluginManagerTest extends TestCase
 
         $off = $kernel->handle(new Request('POST', '/api/v1/plugin/emp-esempio/disinstalla', $h, '127.0.0.1'));
         self::assertSame(200, $off->status);
-        self::assertSame(['emp-core' => '0.1.18'], $this->installer->installed());
+        self::assertSame(['emp-core' => '0.1.19'], $this->installer->installed());
     }
 }

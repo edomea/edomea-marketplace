@@ -164,6 +164,7 @@ return [
     'server_version' => '${EMP_VERSION}',
     'arrivals_dir' => '${EMP_DATA}/arrivi/plugin',
     'backup_web_dir' => '${EMP_DATA}/backup-web',
+    'module_data_dir' => '${EMP_DATA}/dati-moduli',
     'boot_control_file' => '${EMP_CONF_DIR}/avvio.conf',
 ];
 EOF

@@ -229,6 +229,22 @@ final class CoreModule implements ModuleInterface
                 : 'Gli operatori possono accedere da qualsiasi postazione.']);
         }));
 
+        // ---- Menu: pagine dei plugin che l'utente può aprire ----------------------------------
+        $r->add('GET', '/api/v1/menu', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
+            $user = self::requireUser($access(), $q);
+            $roles = $kernel->jobRoles();
+            $pages = [];
+            foreach ($kernel->modules() as $m) {
+                foreach ($m->pages as $p) {
+                    if ($roles->allows($user, $p['permission'])) {
+                        $pages[] = ['modulo' => $m->id, 'id' => $p['id'], 'label' => $p['label'], 'href' => '/m/' . $m->id . '/' . $p['file']];
+                    }
+                }
+            }
+
+            return Response::json(['pagine' => $pages]);
+        }));
+
         // ---- Email in uscita (SMTP) -------------------------------------------------------
         $mailAction = static fn (Request $q, bool $confirm, \Closure $fn): Response => AdminGuard::check($q) ?? self::run(static function () use ($access, $q, $fn, $confirm): Response {
             $user = self::requireUser($access(), $q, false, Role::TECNICO);

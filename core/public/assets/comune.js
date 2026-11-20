@@ -98,6 +98,56 @@ const EMP = {
     for (const li of document.querySelectorAll(".emp-menu li[data-ruoli]")) {
       li.hidden = !ruolo || !li.dataset.ruoli.split(" ").includes(ruolo);
     }
+    if (ruolo) EMP.loadPluginMenu();
+  },
+
+  /** Pagine dei plugin che l'utente può aprire (secondo i permessi dei suoi ruoli), in fondo al menu. */
+  async loadPluginMenu() {
+    const ul = document.querySelector(".emp-menu ul");
+    if (!ul || ul.dataset.plugin) return;
+    ul.dataset.plugin = "1";
+    let pages = [];
+    try {
+      pages = (await EMP.api("menu")).pagine;
+    } catch (_) {
+      return;
+    }
+    if (!pages.length) return;
+    const sep = document.createElement("li");
+    sep.className = "emp-menu-gruppo";
+    sep.textContent = "Funzioni";
+    ul.appendChild(sep);
+    for (const p of pages) {
+      const li = document.createElement("li");
+      li.dataset.voce = p.modulo + ":" + p.id;
+      const a = document.createElement("a");
+      a.href = p.href;
+      a.textContent = p.label;
+      li.appendChild(a);
+      ul.appendChild(li);
+    }
+    EMP.setVoce(document.body.dataset.voce || "");
+  },
+
+  /**
+   * Avvio di una pagina di plugin: utente collegato (altrimenti alla pagina di accesso), menu e badge.
+   * @returns {Promise<object|null>} l'utente, o null se la pagina sta per cambiare
+   */
+  async initPage() {
+    let stato;
+    try {
+      stato = await EMP.api("accesso/stato");
+    } catch (e) {
+      EMP.toast(e.message, true);
+      return null;
+    }
+    if (!stato.utente || stato.utente.cambio_password) {
+      location.replace("/admin/");
+      return null;
+    }
+    EMP.showUser(stato.utente);
+    EMP.setMenuUser(stato.utente.ruolo);
+    return stato.utente;
   },
 
   /** Versioni installate in fondo a ogni pagina (EMP Server e Core). */

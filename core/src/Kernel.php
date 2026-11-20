@@ -62,6 +62,8 @@ final class Kernel
         private readonly ?string $backupWebDir = null,
         /** File dell'avvio dei plugin deciso dalla console (avvio sicuro, plugin disattivati). */
         private readonly ?string $bootControlFile = null,
+        /** Cartella dei file dei plugin (dati-moduli): <dir>/<id>/, con "pubblico/" servita in /m-file/<id>/. */
+        private readonly ?string $moduleDataDir = null,
     ) {
         $this->router = new Router();
         $this->autoloader = new Psr4Autoloader();
@@ -198,6 +200,25 @@ final class Kernel
         return $this->backupWebDir !== null ? new BackupBridge($this->backupWebDir) : null;
     }
 
+    /**
+     * Cartella dei file di un plugin (creata se manca). Quello che sta in "pubblico/" è raggiungibile
+     * dal browser in /m-file/<id>/… (es. foto dei prodotti); il resto resta privato.
+     */
+    public function moduleDataDir(string $moduleId): string
+    {
+        if ($this->moduleDataDir === null || !preg_match('/^[a-z][a-z0-9-]{2,63}$/', $moduleId)) {
+            throw new \RuntimeException('Cartella dei file dei plugin non configurata');
+        }
+        $dir = $this->moduleDataDir . '/' . $moduleId;
+        foreach ([$dir, $dir . '/pubblico'] as $d) {
+            if (!is_dir($d) && !@mkdir($d, 0755, true) && !is_dir($d)) {
+                throw new \RuntimeException('Impossibile creare ' . $d);
+            }
+        }
+
+        return $dir;
+    }
+
     /** Posta in uscita (SMTP) configurata dal Tecnico: per il Core e i plugin. */
     public function mailer(?\Closure $connector = null): MailService
     {
@@ -208,6 +229,23 @@ final class Kernel
     public function brand(): BrandService
     {
         return new BrandService($this->installer->pdo(), $this->installer->tablePrefix('core_'), $this->clock, $this->audit());
+    }
+
+    /** Database di EMP, per i plugin (ognuno scrive solo nelle proprie tabelle). */
+    public function pdo(): \PDO
+    {
+        return $this->installer->pdo();
+    }
+
+    /** Prefisso completo delle tabelle di un modulo (prefisso dell'installazione + table_prefix). */
+    public function tablePrefix(Manifest $module): string
+    {
+        return $this->installer->tablePrefix((string) $module->tablePrefix);
+    }
+
+    public function clock(): Clock
+    {
+        return $this->clock;
     }
 
     /** Registro di tracciabilità del Core. */

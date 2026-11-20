@@ -83,8 +83,11 @@ async function load() {
     document.getElementById("core-version").textContent = "Core " + (data.core || "non installato");
     document.getElementById("no-catalog").hidden = data.catalogo;
     const errBox = document.getElementById("errors");
-    errBox.hidden = data.errori.length === 0;
-    errBox.textContent = data.errori.join("\n");
+    const avvisi = data.avvio_sicuro
+      ? ["AVVIO SICURO: si avvia solo il Core, i plugin sono fermi. Per tornare al normale: sudo emp-server avvio-sicuro --fine"]
+      : [];
+    errBox.hidden = data.errori.length === 0 && avvisi.length === 0;
+    errBox.textContent = avvisi.concat(data.errori).join("\n");
 
     body.replaceChildren();
     if (data.plugin.length === 0) {
@@ -101,8 +104,11 @@ async function load() {
       tr.appendChild(cell(p.versione_installata || "—"));
       tr.appendChild(cell(Object.entries(p.dipendenze).map(([d, v]) => d + " " + v).join(", ") || "—"));
       tr.appendChild(cell(p.origine || "—"));
-      const st = cell(STATI[p.stato] || p.stato, p.motivo || "");
-      st.classList.add("stato", p.stato);
+      // Installato ma fermato dalla console del Server (avvio sicuro o plugin-disattiva).
+      const st = p.fermo
+        ? cell("Fermo", p.fermo + ". Per riattivarlo: " + (data.avvio_sicuro ? "sudo emp-server avvio-sicuro --fine" : "sudo emp-server plugin-riattiva " + p.id))
+        : cell(STATI[p.stato] || p.stato, p.motivo || "");
+      st.classList.add("stato", p.fermo ? "non_disponibile" : p.stato);
       tr.appendChild(st);
       tr.appendChild(actions(p));
       body.appendChild(tr);

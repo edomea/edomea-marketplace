@@ -161,6 +161,7 @@ return [
     'server_version' => '${EMP_VERSION}',
     'arrivals_dir' => '${EMP_DATA}/arrivi/plugin',
     'backup_web_dir' => '${EMP_DATA}/backup-web',
+    'boot_control_file' => '${EMP_CONF_DIR}/avvio.conf',
 ];
 EOF
     install -m 0640 -o root -g "$EMP_USER" "$tmp" "$EMP_CONFIG"
@@ -240,7 +241,7 @@ install_core() {
 
 configure_services() {
     step "PHP-FPM, Nginx, firewall e operazioni pianificate"
-    local subst=(-e "s#@EMP_DATA@#${EMP_DATA}#g" -e "s#@EMP_MODULES@#${EMP_MODULES}#g" -e "s#@EMP_TLS@#${EMP_TLS}#g" -e "s#@EMP_CONFIG@#${EMP_CONFIG}#g")
+    local subst=(-e "s#@EMP_DATA@#${EMP_DATA}#g" -e "s#@EMP_MODULES@#${EMP_MODULES}#g" -e "s#@EMP_TLS@#${EMP_TLS}#g" -e "s#@EMP_CONFIG@#${EMP_CONFIG}#g" -e "s#@EMP_BOOT_CONF@#${EMP_CONF_DIR}/avvio.conf#g")
 
     sed "${subst[@]}" "$SOURCE_DIR/modelli/php-fpm-emp.conf" > "/etc/php/${PHP_VERSION}/fpm/pool.d/emp.conf"
     # Il gruppo predefinito "www" di Ubuntu non serve: disattivato per ridurre la superficie.

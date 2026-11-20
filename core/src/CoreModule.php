@@ -75,6 +75,8 @@ final class CoreModule implements ModuleInterface
             'stato' => 'ok',
             'core' => (string) $manifest->version,
             'server' => $kernel->serverVersion,
+            // Avvio sicuro (sudo emp-server avvio-sicuro): le pagine lo segnalano accanto alla versione.
+            'avvio_sicuro' => $kernel->bootControl()->safeMode,
             'ora' => $kernel->clock->now()->format(\DateTimeInterface::ATOM),
         ]));
 

@@ -15,7 +15,10 @@
 #   sudo emp-server accesso-scp NOME [--togli]     backup scaricabili e plugin caricabili via scp per NOME
 #   sudo emp-server elimina-vecchio-utente         elimina l'account personale "emp" (EMP usa un utente di sistema)
 #   sudo emp-server sistema verifica|aggiorna|riavvia  aggiornamenti dei pacchetti di Ubuntu (con backup prima)
-#   sudo emp-server moduli                         moduli installati (Core e plugin)
+#   sudo emp-server moduli                         moduli installati (Core e plugin), con quelli fermi
+#   sudo emp-server plugin-disattiva NOME          ferma un plugin che blocca EMP (resta installato, dati compresi)
+#   sudo emp-server plugin-riattiva NOME           lo riavvia
+#   sudo emp-server avvio-sicuro [--fine]          avvia solo il Core (tutti i plugin fermi); --fine per tornare al normale
 #   sudo emp-server azzera --nome NOME             total reset di un clone del master (dati, identità, nome)
 #   sudo emp-server collega-github                 collega questo Server a GitHub (token da GitHub)
 #
@@ -220,13 +223,14 @@ cmd_stato() {
     fi
     echo "Moduli:"
     core_cli elenco | sed 's/^/  /' || true
+    boot_status_lines
     echo "Certificato HTTPS: scade il $(openssl x509 -in "$EMP_TLS/server.crt" -noout -enddate | cut -d= -f2)"
     echo "Impronta SHA-256 dell'autorità locale: $(ca_fingerprint)"
     local last
     last=$(find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf '%T@ %f\n' 2>/dev/null | sort -rn | sed -n '1s/^[^ ]* //p')
     echo "Ultimo backup: ${last:-nessuno}"
     warn_personal_emp_user
-    if [[ -f $REMOTE_CONF ]]; then echo "Copia remota: $(remote_description)"; else echo "Copia remota: non collegata (sudo emp-server backup-remoto collega gdrive)"; fi
+    if [[ -f $REMOTE_CONF ]]; then echo "Copia remota: $(remote_description)$([[ -f $REMOTE_DIR/account ]] && echo " — account $(cat "$REMOTE_DIR/account")")"; else echo "Copia remota: non collegata (sudo emp-server backup-remoto collega gdrive)"; fi
     echo "Indirizzi:"
     cmd_indirizzi
 }
@@ -652,6 +656,8 @@ cmd_backup_elenco() {
         if remote_configured; then
             local list
             if list=$(rclone_emp lsjson emp-cifrato: --files-only 2>/dev/null); then
+                # Collegamenti precedenti alla 0.6.0-alpha.10: l'account si legge ora (rclone ha appena rinnovato il token).
+                [[ -f $REMOTE_DIR/account ]] || gdrive_save_account || true
                 printf 'destinazione\t%s\t1\n' "$(remote_description)"
                 # shellcheck disable=SC2016  # codice PHP, non variabili della shell
                 php -r 'foreach (json_decode(stream_get_contents(STDIN), true) ?: [] as $f) {
@@ -662,6 +668,7 @@ cmd_backup_elenco() {
             else
                 printf 'destinazione\t%s\t0\n' "$(remote_description)"
             fi
+            remote_details_tsv
         fi
         return 0
     fi
@@ -676,8 +683,50 @@ cmd_backup_elenco() {
 
 # ---------------------------------------------------------------- destinazione remota (cifrata)
 
+# Per la pagina Backup: tipo, data del collegamento, account Google, client OAuth (mai il Client Secret).
+remote_details_tsv() {
+    local id
+    printf 'tipo\t%s\n' "$(remote_kind)"
+    printf 'dal\t%s\n' "$(remote_connected_epoch)"
+    if remote_is_gdrive; then
+        [[ -f $REMOTE_DIR/account ]] && printf 'account\t%s\n' "$(head -c 254 "$REMOTE_DIR/account" | head -n1)"
+        id=$(remote_google_client_id)
+        printf 'client\t%s\n' "${id:-predefinito}"
+    fi
+    return 0
+}
+
 remote_description() {
     if [[ -f $REMOTE_DIR/destinazione ]]; then cat "$REMOTE_DIR/destinazione"; else echo "destinazione remota"; fi
+}
+
+valid_google_client_id() { [[ $1 =~ ^[0-9]{4,30}-[a-z0-9]{8,64}\.apps\.googleusercontent\.com$ ]]; }
+valid_google_client_secret() { [[ $1 =~ ^[A-Za-z0-9_-]{10,128}$ ]]; }
+remote_is_gdrive() { [[ -f $REMOTE_CONF ]] && grep -qx 'type = drive' "$REMOTE_CONF"; }
+remote_kind() {
+    [[ -f $REMOTE_CONF ]] || return 0
+    sed -n '/^\[emp-destinazione\]/,/^\[/s/^type = //p' "$REMOTE_CONF" | head -n1 | sed 's/^drive$/gdrive/;s/^local$/locale/'
+}
+remote_google_client_id() { [[ -f $REMOTE_CONF ]] && sed -n 's/^client_id = //p' "$REMOTE_CONF" | head -n1; }
+# Data del collegamento: il file della descrizione si scrive solo quando si collega una destinazione.
+remote_connected_epoch() { stat -c %Y "$REMOTE_DIR/destinazione" 2>/dev/null || true; }
+
+# Account Google collegato (indirizzo email), letto da Google con il token di rclone e salvato in
+# $REMOTE_DIR/account. Il permesso drive.file basta per leggere chi è l'utente (Drive API "about").
+gdrive_save_account() {
+    remote_is_gdrive || return 1
+    local access json email
+    # shellcheck disable=SC2016  # codice PHP, non variabili della shell
+    access=$(sed -n 's/^token = //p' "$REMOTE_CONF" | head -n1 | php -r '$t = json_decode(stream_get_contents(STDIN), true);
+        $a = is_array($t) ? ($t["access_token"] ?? "") : ""; if (!is_string($a) || !preg_match("/^[A-Za-z0-9._~+\/=-]{10,4096}$/", $a)) { exit(1); } echo $a;') || return 1
+    # Il token va a curl dallo standard input, non sulla riga di comando (visibile con ps).
+    json=$(printf 'header = "Authorization: Bearer %s"\n' "$access" \
+        | curl -fsS --max-time 15 -K - 'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)' 2>/dev/null) || return 1
+    # shellcheck disable=SC2016  # codice PHP, non variabili della shell
+    email=$(php -r '$j = json_decode(stream_get_contents(STDIN), true); $e = $j["user"]["emailAddress"] ?? "";
+        if (!is_string($e) || strlen($e) > 254 || !preg_match("/^[^\s@]+@[^\s@]+$/", $e)) { exit(1); } echo $e;' <<<"$json") || return 1
+    printf '%s\n' "$email" > "$REMOTE_DIR/account"
+    chmod 0600 "$REMOTE_DIR/account"
 }
 
 new_backup_key() {
@@ -695,6 +744,9 @@ cmd_backup_remoto() {
         stato)
             if remote_configured; then
                 info "Destinazione: $(remote_description)"
+                [[ -f $REMOTE_DIR/account ]] && info "Account Google: $(cat "$REMOTE_DIR/account")"
+                [[ -n $(remote_connected_epoch) ]] && info "Collegata dal $(date -d "@$(remote_connected_epoch)" '+%d/%m/%Y %H:%M')"
+                remote_is_gdrive && [[ -n $(remote_google_client_id) ]] && info "Client Google proprio: $(remote_google_client_id)"
                 if rclone_emp lsf emp-cifrato: --files-only >/dev/null 2>&1; then info "Raggiungibile"; else echo "Avviso: non raggiungibile ora"; fi
             else
                 info "Nessuna destinazione remota: sudo emp-server backup-remoto collega gdrive"
@@ -706,12 +758,12 @@ cmd_backup_remoto() {
         scollega)
             rm -rf "$REMOTE_DIR"
             info "Destinazione remota scollegata da questa macchina (i backup già inviati restano dove sono)" ;;
-        *) die "uso: emp-server backup-remoto collega gdrive|sftp|locale … | stato | chiave | scollega" ;;
+        *) die "uso: emp-server backup-remoto collega gdrive [--client-id ID --client-secret-file FILE]|sftp|locale … | stato | chiave | scollega" ;;
     esac
 }
 
 remote_connect() {
-    local kind=${1:-} key='' arg='' folder pw='' token_file='' password_file=''
+    local kind=${1:-} key='' arg='' folder pw='' token_file='' password_file='' client_id='' client_secret=''
     shift || true
     while (($#)); do
         case $1 in
@@ -719,9 +771,17 @@ remote_connect() {
             # Senza terminale (pagina Backup di /techadmin): token di Google già ottenuto, password SFTP in un file.
             --token-file) [[ $# -ge 2 && -f $2 ]] || die "file del token mancante"; token_file=$2; shift 2 ;;
             --password-file) [[ $# -ge 2 && -f $2 ]] || die "file della password mancante"; password_file=$2; shift 2 ;;
+            # Google Drive con un client OAuth proprio (facoltativo): Client ID e file con il Client Secret.
+            --client-id) [[ $# -ge 2 ]] || die "manca il Client ID dopo --client-id"; client_id=$2; shift 2 ;;
+            --client-secret-file) [[ $# -ge 2 && -f $2 ]] || die "file del Client Secret mancante"; client_secret=$(head -c 256 "$2"); shift 2 ;;
             *) arg=$1; shift ;;
         esac
     done
+    if [[ -n $client_id || -n $client_secret ]]; then
+        [[ $kind == gdrive ]] || die "Client ID e Client Secret valgono solo per Google Drive"
+        valid_google_client_id "$client_id" || die "Client ID di Google non valido (formato NUMERI-xxxx.apps.googleusercontent.com)"
+        valid_google_client_secret "$client_secret" || die "Client Secret di Google non valido"
+    fi
     command -v rclone >/dev/null || die "rclone non installato: rieseguire installa.sh"
     # Una sola cartella per account: il nome del server è nel nome di ogni file, così una
     # macchina nuova vede i backup di quella vecchia e può ripristinarli.
@@ -742,7 +802,11 @@ remote_connect() {
                 token=$(php -r '$t = json_decode(file_get_contents($argv[1]), true);
                     if (!is_array($t) || !isset($t["access_token"]) || !is_string($t["access_token"])) { exit(1); }
                     echo json_encode($t, JSON_UNESCAPED_SLASHES);' "$token_file") || { rm -f "$tmp"; die "token di Google non valido"; }
-                printf '[emp-destinazione]\ntype = drive\nscope = drive.file\ntoken = %s\n\n' "$token" > "$tmp"
+                {
+                    printf '[emp-destinazione]\ntype = drive\nscope = drive.file\n'
+                    [[ -n $client_id ]] && printf 'client_id = %s\nclient_secret = %s\n' "$client_id" "$client_secret"
+                    printf 'token = %s\n\n' "$token"
+                } > "$tmp"
                 echo "Google Drive ($folder)" > "$REMOTE_DIR/destinazione"
             else
             echo
@@ -753,7 +817,8 @@ remote_connect() {
             echo "poi apri in Chrome il link http://127.0.0.1:53682/... che compare qui sotto e accedi con l'account Google dei backup."
             echo "EMP vede solo i file che crea lui su Drive (permesso drive.file), nella cartella $folder."
             echo
-            rclone --config "$tmp" config create emp-destinazione drive scope=drive.file >/dev/null \
+            rclone --config "$tmp" config create emp-destinazione drive scope=drive.file \
+                ${client_id:+client_id="$client_id"} ${client_secret:+client_secret="$client_secret"} >/dev/null \
                 || { rm -f "$tmp"; die "collegamento a Google Drive non riuscito"; }
             echo "Google Drive ($folder)" > "$REMOTE_DIR/destinazione"
             fi ;;
@@ -781,9 +846,17 @@ remote_connect() {
     rclone --config "$tmp" config create emp-cifrato crypt remote="emp-destinazione:$folder" password="$key" \
         filename_encryption=off directory_name_encryption=false --obscure >/dev/null
     chmod 0600 "$tmp"
+    rm -f "$REMOTE_DIR/account"
     mv "$tmp" "$REMOTE_CONF"
     rclone_emp mkdir emp-cifrato: || die "destinazione non raggiungibile"
     info "Destinazione collegata: $(remote_description)"
+    if [[ $kind == gdrive ]]; then
+        if gdrive_save_account; then
+            info "Account Google: $(cat "$REMOTE_DIR/account")"
+        else
+            echo "Avviso: account Google non letto (si riprova al prossimo controllo della destinazione)"
+        fi
+    fi
     echo
     echo "================================================================"
     echo " CHIAVE DEI BACKUP — salvala ORA fuori da questa macchina"
@@ -932,6 +1005,131 @@ SQL
 cmd_moduli() {
     require_root moduli
     core_cli elenco
+    boot_status_lines
+}
+
+# ---------------------------------------------------------------- plugin fermi (recupero)
+#
+# Se un plugin blocca EMP (pagine che non si aprono, "Servizio non disponibile"), dalla console:
+#   sudo emp-server plugin-disattiva NOME     ferma solo quel plugin (e chi dipende da lui)
+#   sudo emp-server avvio-sicuro              ferma tutti i plugin: si avvia solo il Core
+# Il plugin resta installato con i suoi dati; il Core legge /etc/emp/avvio.conf a ogni richiesta,
+# quindi l'effetto è immediato, senza riavvii. Il file è della macchina: non va nei backup.
+
+readonly BOOT_CONF=$EMP_CONF_DIR/avvio.conf
+BOOT_SAFE=no
+BOOT_DISABLED=()
+
+valid_plugin_id() { [[ $1 =~ ^[a-z][a-z0-9-]{2,63}$ && $1 != emp-core ]]; }
+
+load_boot_conf() {
+    BOOT_SAFE=no
+    BOOT_DISABLED=()
+    [[ -f $BOOT_CONF ]] || return 0
+    local key value id ids
+    while IFS='=' read -r key value; do
+        case $key in
+            AVVIO_SICURO) [[ $value == si ]] && BOOT_SAFE=si ;;
+            DISATTIVATI)
+                IFS=',' read -ra ids <<<"$value"
+                for id in "${ids[@]}"; do valid_plugin_id "$id" && BOOT_DISABLED+=("$id"); done ;;
+        esac
+    done < "$BOOT_CONF"
+    return 0
+}
+
+save_boot_conf() {
+    local tmp list
+    list=$(printf '%s\n' "${BOOT_DISABLED[@]}" | sed '/^$/d' | sort -u | paste -sd, -)
+    if [[ $BOOT_SAFE == no && -z $list ]]; then
+        rm -f "$BOOT_CONF"
+        return 0
+    fi
+    install -d -m 0755 -o root -g root "$EMP_CONF_DIR"
+    tmp=$(mktemp "$EMP_CONF_DIR/.avvio-XXXXXX")
+    {
+        echo "# EMP Server — avvio dei plugin (emp-server plugin-disattiva / plugin-riattiva / avvio-sicuro)"
+        echo "AVVIO_SICURO=$BOOT_SAFE"
+        echo "DISATTIVATI=$list"
+    } > "$tmp"
+    chmod 0644 "$tmp"
+    mv "$tmp" "$BOOT_CONF"
+}
+
+boot_is_disabled() {
+    local id
+    for id in "${BOOT_DISABLED[@]}"; do [[ $id == "$1" ]] && return 0; done
+    return 1
+}
+
+boot_status_lines() {
+    load_boot_conf
+    [[ $BOOT_SAFE == si ]] && echo "  AVVIO SICURO attivo: si avvia solo il Core (per tornare al normale: sudo emp-server avvio-sicuro --fine)"
+    local id
+    for id in "${BOOT_DISABLED[@]}"; do
+        echo "  $id: disattivato dalla console (sudo emp-server plugin-riattiva $id)"
+    done
+    return 0
+}
+
+# Il plugin deve risultare installato; se il Core non risponde nemmeno da console, si procede lo stesso.
+require_installed_plugin() {
+    local list
+    if list=$(core_cli elenco 2>/dev/null); then
+        grep -q "^$1 " <<<"$list" || die "plugin non installato: $1 (elenco: sudo emp-server moduli)"
+    else
+        echo "Avviso: elenco dei moduli non disponibile, $1 non verificato"
+    fi
+}
+
+cmd_plugin_disattiva() {
+    require_root plugin-disattiva
+    local id=${1:-}
+    valid_plugin_id "$id" || die "uso: sudo emp-server plugin-disattiva NOME (es. emp-esempio; il Core non si può fermare)"
+    require_installed_plugin "$id"
+    load_boot_conf
+    if boot_is_disabled "$id"; then
+        info "$id è già disattivato"
+        return 0
+    fi
+    BOOT_DISABLED+=("$id")
+    save_boot_conf
+    info "$id disattivato: resta installato con i suoi dati, ma non si avvia (nemmeno chi dipende da lui)"
+    echo "Per riattivarlo: sudo emp-server plugin-riattiva $id"
+}
+
+cmd_plugin_riattiva() {
+    require_root plugin-riattiva
+    local id=${1:-} kept=() d
+    valid_plugin_id "$id" || die "uso: sudo emp-server plugin-riattiva NOME"
+    load_boot_conf
+    boot_is_disabled "$id" || { info "$id non è disattivato"; return 0; }
+    for d in "${BOOT_DISABLED[@]}"; do [[ $d == "$id" ]] || kept+=("$d"); done
+    BOOT_DISABLED=("${kept[@]}")
+    save_boot_conf
+    info "$id riattivato"
+    [[ $BOOT_SAFE == si ]] && echo "Avviso: è attivo l'avvio sicuro, i plugin restano fermi finché non dai: sudo emp-server avvio-sicuro --fine"
+    return 0
+}
+
+cmd_avvio_sicuro() {
+    require_root avvio-sicuro
+    load_boot_conf
+    case ${1:-} in
+        '')
+            BOOT_SAFE=si
+            save_boot_conf
+            info "Avvio sicuro attivo: si avvia solo il Core, tutti i plugin sono fermi (installati, dati compresi)"
+            echo "Ora le pagine /techadmin e /admin si aprono. Per trovare il plugin che blocca:"
+            echo "  sudo emp-server plugin-disattiva NOME, poi sudo emp-server avvio-sicuro --fine"
+            ;;
+        --fine)
+            BOOT_SAFE=no
+            save_boot_conf
+            info "Avvio normale: si avviano tutti i plugin installati${BOOT_DISABLED[*]:+, tranne quelli disattivati (${BOOT_DISABLED[*]})}"
+            ;;
+        *) die "uso: sudo emp-server avvio-sicuro [--fine]" ;;
+    esac
 }
 
 # ---------------------------------------------------------------- total reset (clone del master)
@@ -1017,7 +1215,7 @@ SQL
     # Identità HTTPS, nome DNS aggiuntivo e destinazione dei backup remoti appartengono alla macchina d'origine.
     # Anche le impostazioni dei backup: il clone riparte da quelle predefinite.
     rm -rf "$EMP_TLS" "$REMOTE_DIR" "$BACKUP_TIMER_DROPIN_DIR"
-    rm -f "$EMP_CONF_DIR/nome-dns" "$BACKUP_CONF"
+    rm -f "$EMP_CONF_DIR/nome-dns" "$BACKUP_CONF" "$EMP_CONF_DIR/avvio.conf"
     systemctl daemon-reload 2>/dev/null || true
     if [[ -f $EMP_CONF_DIR/github.conf ]]; then
         sed -i -E 's/^EMP_NOME_DNS=.*/EMP_NOME_DNS=/' "$EMP_CONF_DIR/github.conf"
@@ -1120,7 +1318,7 @@ cmd_collega_github() {
 }
 
 usage() {
-    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -1142,6 +1340,9 @@ main() {
         elimina-vecchio-utente) cmd_elimina_vecchio_utente "$@" ;;
         sistema) cmd_sistema "$@" ;;
         moduli) cmd_moduli ;;
+        plugin-disattiva) cmd_plugin_disattiva "$@" ;;
+        plugin-riattiva) cmd_plugin_riattiva "$@" ;;
+        avvio-sicuro) cmd_avvio_sicuro "$@" ;;
         azzera) cmd_azzera "$@" ;;
         collega-github) cmd_collega_github "$@" ;;
         -h | --help | aiuto | '') usage ;;

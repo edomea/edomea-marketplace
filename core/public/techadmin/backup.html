@@ -67,7 +67,9 @@
       <p class="note">Ogni backup viene copiato anche sulla destinazione remota, cifrato con la <strong>chiave dei backup</strong>.
         Senza la chiave i backup remoti non si possono aprire: va conservata fuori da questa macchina.</p>
       <p id="dest-attuale"></p>
+      <ul id="dest-dettagli" class="note" hidden></ul>
       <div id="dest-azioni" class="riga-azioni" hidden>
+        <button type="button" id="ricollega" class="secondario" hidden>Cambia account / Ricollega</button>
         <button type="button" id="mostra-chiave" class="secondario">Mostra la chiave dei backup</button>
         <button type="button" id="cambia-dest" class="secondario">Cambia destinazione</button>
         <button type="button" id="scollega" class="secondario">Scollega</button>
@@ -84,14 +86,28 @@
         </fieldset>
         <p class="note" data-tipo="gdrive">EMP vede solo i file che crea lui, nella cartella <code>EMP-backup</code> del Drive.
           Dopo "Collega" si apre Google: accedere con l'account dei backup e consentire l'accesso.</p>
+        <details data-tipo="gdrive" class="note">
+          <summary>Client Google proprio (facoltativo)</summary>
+          <p>Di solito non serve: lasciare vuoto. Serve solo se avete un progetto su Google Cloud con un client OAuth
+            di tipo <strong>App desktop</strong> e l'API Google Drive attiva. Attenzione: EMP vede solo i file creati con lo
+            stesso client, quindi passando da un client all'altro i backup già sul Drive non compaiono più nell'elenco.</p>
+          <label>Client ID <input name="client_id" autocomplete="off" spellcheck="false" placeholder="123456789012-xxxx.apps.googleusercontent.com"></label>
+          <label>Client Secret <input name="client_secret" type="password" autocomplete="new-password" spellcheck="false"></label>
+        </details>
         <label data-tipo="sftp" hidden>Server <input name="destinazione" autocomplete="off" placeholder="utente@server oppure utente@server:porta"></label>
         <label data-tipo="sftp" hidden>Password SFTP <input name="password_sftp" type="password" autocomplete="off">
           <span class="note">Vuota per usare la chiave SSH di root del Server.</span></label>
         <label data-tipo="cartella" hidden>Cartella <input name="percorso" autocomplete="off" placeholder="/mnt/disco-backup">
           <span class="note">Sotto /mnt, /media o /srv, già montata sul Server.</span></label>
         <label>Chiave dei backup esistente (facoltativa)
-          <input name="chiave" autocomplete="off" placeholder="EMP-BK-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX">
-          <span class="note">Solo per ritrovare i backup di un server precedente (nuova installazione). Vuota: viene creata una chiave nuova.</span></label>
+          <!-- Non è un nome utente: il browser non deve proporre né riempire nulla qui. -->
+          <input name="chiave" id="chiave-esistente" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false"
+            data-lpignore="true" data-1p-ignore data-bwignore data-form-type="other"
+            maxlength="48" placeholder="EMP-BK-XXXXXX-XXXXXX-XXXXXX-XXXXXX-XXXXXX">
+          <span class="note">Solo per ritrovare i backup di un server precedente (nuova installazione). Vuota: viene creata una chiave nuova.</span>
+          <span id="chiave-errore" class="avviso" hidden></span></label>
+        <!-- Nome utente per il browser: così abbina la password al Tecnico e non alla chiave qui sopra. -->
+        <input name="username" id="collega-utente" type="text" autocomplete="username" hidden>
         <label>La tua password <input name="password" type="password" autocomplete="current-password" required></label>
         <button type="submit">Collega</button>
         <button type="button" id="annulla-collega" class="secondario" hidden>Annulla</button>

@@ -32,6 +32,9 @@ final class PluginManager
         private readonly Installer $installer,
         private readonly string $phpVersion = PHP_VERSION,
         private readonly ?LocalCatalog $local = null,
+        /** @var array<string, string> plugin installati ma non avviati (id => motivo) */
+        private readonly array $stopped = [],
+        private readonly bool $safeMode = false,
     ) {
     }
 
@@ -101,6 +104,8 @@ final class PluginManager
                 'motivo' => $reason,
                 'origine' => $origins[$id] ?? null,
                 'nel_catalogo_locale' => in_array($id, $localIds, true),
+                // Installato ma fermato dalla console (avvio sicuro, plugin-disattiva): motivo, altrimenti null.
+                'fermo' => $installedVersion !== null ? ($this->stopped[$id] ?? null) : null,
             ];
         }
 
@@ -108,6 +113,7 @@ final class PluginManager
             'catalogo' => $this->catalog->isConfigured() || $this->local !== null,
             'catalogo_locale' => $this->local?->isWritable() ?? false,
             'core' => $installed[Manifest::CORE_ID] ?? null,
+            'avvio_sicuro' => $this->safeMode,
             'plugin' => $rows,
             'errori' => $errors,
         ];

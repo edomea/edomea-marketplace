@@ -175,6 +175,21 @@ final class BackupTest extends TestCase
         self::assertSame(202, $sftp->status, $sftp->body);
         $req = $this->request(json_decode($sftp->body, true)['richiesta'] . '.req');
         self::assertSame(['sftp', 'backup@nas.local:2222', 'segreta'], [$req['azione'], $req['destinazione'], base64_decode($req['password_b64'])]);
+        // Google Drive: ricollega con la stessa chiave e client OAuth proprio (facoltativo).
+        $client = ['client_id' => '123456789012-abcdefgh12345678.apps.googleusercontent.com', 'client_secret' => 'GOCSPX-SegretoGoogle_123'];
+        $re = $post('destinazione', ['tipo' => 'gdrive', 'password' => self::PWD, 'ricollega' => true] + $client);
+        self::assertSame(202, $re->status, $re->body);
+        $req = $this->request(json_decode($re->body, true)['richiesta'] . '.req');
+        self::assertSame(['gdrive_avvia', '1', $client['client_id'], $client['client_secret']],
+            [$req['azione'], $req['mantieni_chiave'], $req['client_id'], base64_decode($req['client_secret_b64'])]);
+        self::assertArrayNotHasKey('chiave', $req);
+        self::assertSame(409, $post('destinazione', ['tipo' => 'gdrive', 'password' => self::PWD, 'ricollega' => true,
+            'chiave' => 'EMP-BK-AAAAAA-BBBBBB-CCCCCC-DDDDDD-EEEEEE'])->status);
+        self::assertSame(409, $post('destinazione', ['tipo' => 'gdrive', 'password' => self::PWD, 'client_id' => 'non-valido', 'client_secret' => 'GOCSPX-SegretoGoogle_123'])->status);
+        self::assertSame(409, $post('destinazione', ['tipo' => 'gdrive', 'password' => self::PWD, 'client_id' => $client['client_id']])->status);
+        $plain = $post('destinazione', ['tipo' => 'gdrive', 'password' => self::PWD]);
+        self::assertSame(202, $plain->status, $plain->body);
+        self::assertSame(['azione', 'utente', 'creato'], array_keys($this->request(json_decode($plain->body, true)['richiesta'] . '.req')));
         self::assertSame(409, $post('destinazione/google', ['indirizzo' => 'https://evil.example/?code=x'])->status);
         self::assertSame(202, $post('destinazione/google', ['indirizzo' => 'http://127.0.0.1:53682/?state=abc&code=4/0A'])->status);
 
@@ -197,6 +212,7 @@ final class BackupTest extends TestCase
         }
         self::assertFalse(str_contains(json_encode($audit) ?: '', 'segreta'));
         self::assertFalse(str_contains(json_encode($audit) ?: '', self::PWD));
+        self::assertFalse(str_contains(json_encode($audit) ?: '', 'SegretoGoogle'));
     }
 
     public function testSystemUpdatesRoutes(): void

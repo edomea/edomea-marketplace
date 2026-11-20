@@ -24,7 +24,7 @@ final class BackupBridge
         'aggiorna' => [],
         'backup' => [],
         'impostazioni' => ['ora', 'notturno', 'conserva_locali', 'conserva_remoti'],
-        'gdrive_avvia' => ['chiave'],
+        'gdrive_avvia' => ['chiave', 'mantieni_chiave', 'client_id', 'client_secret_b64'],
         'gdrive_completa' => ['indirizzo'],
         'sftp' => ['destinazione', 'password_b64', 'chiave'],
         'cartella' => ['percorso', 'chiave'],

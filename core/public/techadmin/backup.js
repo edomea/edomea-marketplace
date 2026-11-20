@@ -142,7 +142,9 @@ function renderDestDetails(dest) {
   const list = $("dest-dettagli");
   const rows = [];
   if (dest.collegata && dest.tipo === "gdrive") {
-    rows.push("Account Google: " + (dest.account || "non ancora letto (si legge al prossimo controllo della destinazione; se resta così usa \"Cambia account / Ricollega\")"));
+    rows.push("Account Google: " + (dest.account
+      || (dest.account_errore ? "non letto — " + dest.account_errore + ". Usa \"Cambia account / Ricollega\"."
+        : "non ancora letto: clicca Aggiorna")));
   }
   if (dest.collegata && dest.dal) rows.push("Collegata dal " + fmtDate(dest.dal));
   if (dest.collegata && dest.tipo === "gdrive") {
@@ -477,7 +479,7 @@ function showKey(key, isNew) {
   const box = $("chiave-box");
   const text = [
     "EMP — Edomea Marketplace",
-    "Chiave dei backup remoti",
+    "Chiave dei backup",
     "",
     "Server: " + location.hostname,
     "Destinazione: " + ((current && current.stato && current.stato.destinazione && current.stato.destinazione.descrizione) || "—"),
@@ -485,16 +487,17 @@ function showKey(key, isNew) {
     "",
     key,
     "",
-    "Serve ad aprire i backup cifrati sulla destinazione remota, anche da una nuova",
-    "installazione (pagina Backup → Collega una destinazione → Chiave dei backup esistente).",
-    "Senza questa chiave i backup remoti NON si possono ripristinare. Conservarla offline.",
+    "Serve ad aprire tutti i backup di questo server: quelli sul server, quelli scaricati",
+    "e quelli sulla destinazione remota, anche da una nuova installazione",
+    "(pagina Backup → Collega una destinazione → Chiave dei backup esistente).",
+    "Senza questa chiave i backup NON si possono ripristinare. Conservarla offline.",
   ].join("\r\n");
   box.replaceChildren();
   box.hidden = false;
   box.appendChild(el("h4", "Chiave dei backup"));
   box.appendChild(el("p", key, "chiave"));
   box.appendChild(el("p", "Salvare la chiave fuori da questa macchina (gestore di password, foglio in cassaforte). "
-    + "Senza la chiave i backup remoti non si possono aprire; chi la possiede e accede alla destinazione può leggere tutti i dati di EMP.", "avviso"));
+    + "Senza la chiave i backup non si possono aprire; chi la possiede e ha un file di backup può leggere tutti i dati di EMP.", "avviso"));
   const dl = button("Scarica la chiave (TXT)", "", () => {
     EMP.downloadText("EMP-chiave-backup-" + location.hostname + ".txt", text);
     check.disabled = false;

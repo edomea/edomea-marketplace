@@ -20,6 +20,7 @@
     Il backup contiene <strong>tutto EMP e solo EMP</strong>: database, Core, plugin, cataloghi e il pacchetto della versione
     di EMP Server in uso. Non contiene ciò che appartiene alla macchina (nome, certificato HTTPS, collegamento a GitHub e a questa
     destinazione remota). Prima di ogni aggiornamento di EMP Server il backup si fa da solo.
+    Tutti i backup, su questa macchina e sulla destinazione remota, sono <strong>cifrati con la chiave dei backup</strong>.
   </p>
   <p class="note">Funzione riservata all'Amministratore Tecnico, disponibile solo con l'indirizzo https://.</p>
 
@@ -64,13 +65,14 @@
     <!-- Destinazione remota -->
     <section class="box">
       <h3>Copia remota cifrata</h3>
-      <p class="note">Ogni backup viene copiato anche sulla destinazione remota, cifrato con la <strong>chiave dei backup</strong>.
-        Senza la chiave i backup remoti non si possono aprire: va conservata fuori da questa macchina.</p>
+      <p class="note">Ogni backup viene copiato anche sulla destinazione remota, cifrato con la stessa <strong>chiave dei backup</strong>.
+        Senza la chiave i backup non si possono aprire: va conservata fuori da questa macchina.</p>
       <p id="dest-attuale"></p>
       <ul id="dest-dettagli" class="note" hidden></ul>
+      <p><button type="button" id="mostra-chiave" class="secondario">Mostra la chiave dei backup</button>
+        <span class="note">Una sola chiave per tutti i backup di questo server, anche senza destinazione remota.</span></p>
       <div id="dest-azioni" class="riga-azioni" hidden>
         <button type="button" id="ricollega" class="secondario" hidden>Cambia account / Ricollega</button>
-        <button type="button" id="mostra-chiave" class="secondario">Mostra la chiave dei backup</button>
         <button type="button" id="cambia-dest" class="secondario">Cambia destinazione</button>
         <button type="button" id="scollega" class="secondario">Scollega</button>
       </div>
@@ -142,7 +144,9 @@
         <thead><tr><th>Backup</th><th>Data</th><th>Dimensione</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
-      <p class="note">Il file scaricato non è cifrato: contiene tutti i dati di EMP. Conservarlo con cura.
+      <p class="note">Il file scaricato è <strong>cifrato</strong> con la chiave dei backup, come quelli copiati via scp: per
+        ripristinarlo su un altro server serve la chiave (la pagina o <code>sudo emp-server ripristina FILE --chiave CHIAVE</code>).
+        Per una copia in chiaro, sul Server: <code>sudo emp-server backup-decifra FILE USCITA</code>.
         Il <strong>ripristino</strong> sostituisce database, Core, plugin e cataloghi con quelli del backup (prima salva lo stato attuale);
         dopo il ripristino si accede con la password valida al momento del backup.</p>
     </section>

@@ -11,7 +11,9 @@
 #   sudo emp-server backup-remoto collega gdrive   copia cifrata di ogni backup su Google Drive (anche sftp)
 #   sudo emp-server backup-impostazioni [--ora HH:MM] [--notturno si|no] [--conserva N] [--conserva-remoti N]
 #   sudo emp-server backup-scarica --remoto NOME   copia un backup remoto (decifrato) su questa macchina
-#   sudo emp-server ripristina FILE|--remoto NOME  rimette EMP com'era nel backup (stessa o nuova macchina)
+#   sudo emp-server ripristina FILE|--remoto NOME [--chiave CHIAVE]  rimette EMP com'era nel backup
+#   sudo emp-server backup-chiave                  chiave dei backup (cifra quelli locali e quelli remoti)
+#   sudo emp-server backup-decifra FILE USCITA [--chiave CHIAVE]  copia in chiaro di un backup cifrato
 #   sudo emp-server accesso-scp NOME [--togli]     backup scaricabili e plugin caricabili via scp per NOME
 #   sudo emp-server elimina-vecchio-utente         elimina l'account personale "emp" (EMP usa un utente di sistema)
 #   sudo emp-server sistema verifica|aggiorna|riavvia  aggiornamenti dei pacchetti di Ubuntu (con backup prima)
@@ -435,7 +437,7 @@ cmd_accesso_scp() {
     local ip
     ip=$(first_private_ipv4)
     info "Accesso scp dato a $name (vale dal prossimo accesso SSH di $name)"
-    echo "  Scaricare un backup, dal PC:   scp $name@$ip:$EMP_BACKUP/emp-backup-….tar ."
+    echo "  Scaricare un backup, dal PC:   scp $name@$ip:$EMP_BACKUP/emp-backup-….tar .   (cifrato: serve la chiave dei backup)"
     echo "  Caricare un plugin, dal PC:    scp mio-plugin.zip $name@$ip:$EMP_ARRIVALS/"
     echo "  I plugin caricati compaiono nella pagina Plugin del Tecnico (https://$ip/techadmin/plugin.html)."
 }
@@ -450,8 +452,12 @@ cmd_accesso_scp() {
 #
 # File: /var/lib/emp/backup/emp-backup-<server>-<AAAAMMGG-HHMMSS>[-etichetta].tar
 #   MANIFEST  SHA256SUMS  database.sql.gz  dati.tar.gz  [emp-server-<versione>.tar.gz]
+# Dalla 0.6.0-alpha.11 il file su questa macchina è CIFRATO con la chiave dei backup
+# (/etc/emp/backup-chiave, della macchina: AES-256-CBC, PBKDF2, formato di "openssl enc", inizia
+# con "Salted__"). Chi lo scarica via scp senza la chiave non legge nulla. I file precedenti, in
+# chiaro, vengono cifrati al primo backup. Ripristino e "backup-decifra" lo rimettono in chiaro.
 # Se è collegata una destinazione remota (emp-server backup-remoto), ogni backup viene
-# copiato anche lì, cifrato con la chiave dei backup.
+# copiato anche lì, cifrato di nuovo con la stessa chiave (rclone crypt).
 
 readonly BACKUP_FORMAT=1
 # Tra i dati (non in $EMP_HOME): resta anche dopo disinstalla.sh, così il backup automatico
@@ -470,6 +476,141 @@ new_temp_dir() { # $1 = variabile, $2 = cartella padre
     local -n _out=$1
     _out=$(mktemp -d "$2/.$1-XXXXXX")
     EMP_TEMP_DIRS+=("$_out")
+}
+
+# ---------------------------------------------------------------- chiave dei backup (una per macchina)
+#
+# Una sola chiave per tutti i backup di questa macchina, locali e remoti: è la stessa della
+# destinazione remota (Google Drive, SFTP, cartella). Sui Server collegati prima della
+# 0.6.0-alpha.11 si riprende quella già usata per la destinazione remota.
+
+readonly BACKUP_KEY_FILE=$EMP_CONF_DIR/backup-chiave
+readonly BACKUP_CIPHER=(-aes-256-cbc -pbkdf2 -iter 200000 -md sha256)
+
+valid_backup_key() { [[ $1 =~ ^EMP-BK(-[A-Z2-7]{6}){5}$ ]]; }
+
+save_backup_key() {
+    local tmp
+    install -d -m 0755 -o root -g root "$EMP_CONF_DIR"
+    tmp=$(mktemp "$EMP_CONF_DIR/.backup-chiave-XXXXXX")
+    chmod 0600 "$tmp"
+    printf '%s\n' "$1" > "$tmp"
+    mv "$tmp" "$BACKUP_KEY_FILE"
+}
+
+# Stampa la chiave della macchina; se manca la riprende dalla destinazione remota o ne crea una nuova.
+backup_key() {
+    local key=''
+    if [[ -f $BACKUP_KEY_FILE ]]; then
+        key=$(head -n1 "$BACKUP_KEY_FILE")
+        if valid_backup_key "$key"; then echo "$key"; return 0; fi
+        key=''
+    fi
+    if [[ -f $REMOTE_CONF ]] && command -v rclone >/dev/null; then
+        key=$(rclone reveal "$(sed -n 's/^password = //p' "$REMOTE_CONF" | head -n1)" 2>/dev/null || true)
+        valid_backup_key "$key" || key=''
+    fi
+    [[ -n $key ]] || key=$(new_backup_key)
+    save_backup_key "$key"
+    echo "$key"
+}
+
+is_encrypted_backup() { [[ $(head -c 8 "$1" 2>/dev/null) == Salted__ ]]; }
+
+# La chiave arriva a openssl dallo standard input, mai sulla riga di comando (visibile con ps).
+encrypt_backup_file() { # $1 file in chiaro, $2 file cifrato, $3 chiave
+    printf '%s\n' "$3" | openssl enc -e "${BACKUP_CIPHER[@]}" -salt -pass stdin -in "$1" -out "$2"
+}
+decrypt_backup_file() { # $1 file cifrato, $2 file in chiaro, $3 chiave
+    printf '%s\n' "$3" | openssl enc -d "${BACKUP_CIPHER[@]}" -pass stdin -in "$1" -out "$2" 2>/dev/null \
+        && tar -tf "$2" MANIFEST >/dev/null 2>&1
+}
+
+# Permessi dei backup locali: leggibili via scp dagli utenti abilitati (gruppo emp-file), sono cifrati.
+backup_file_perms() {
+    chgrp "$EMP_SCP_GROUP" "$1" 2>/dev/null || true
+    chmod 0640 "$1"
+}
+
+# Sostituisce $1 con $2 conservando la data di $1 (serve all'ordine e alla conservazione degli ultimi N).
+replace_keeping_date() {
+    touch -r "$1" "$2"
+    backup_file_perms "$2"
+    mv -f -- "$2" "$1"
+}
+
+# Cifra i backup locali ancora in chiaro (creati prima della 0.6.0-alpha.11 o copiati a mano).
+encrypt_local_backups() {
+    local key f n=0
+    [[ -d $EMP_BACKUP ]] || return 0
+    key=$(backup_key)
+    while IFS= read -r -d '' f; do
+        is_encrypted_backup "$f" && continue
+        if encrypt_backup_file "$f" "$f.cifra" "$key"; then
+            replace_keeping_date "$f" "$f.cifra"
+            n=$((n + 1))
+        else
+            rm -f -- "${f:?}.cifra"
+            echo "Avviso: $(basename "$f") non cifrato"
+        fi
+    done < <(find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -print0)
+    ((n == 0)) || info "Backup locali in chiaro cifrati con la chiave dei backup: $n"
+}
+
+# Nuova chiave per la macchina (es. chiave di un server precedente): i backup locali cifrati con
+# la vecchia vengono ricifrati con la nuova, così si aprono tutti con la stessa chiave.
+change_backup_key() {
+    local new=$1 old f tmp n=0
+    old=$(backup_key)
+    [[ $old == "$new" ]] && return 0
+    if [[ -d $EMP_BACKUP ]]; then
+        while IFS= read -r -d '' f; do
+            is_encrypted_backup "$f" || continue
+            tmp=$(mktemp "$EMP_BACKUP/.ricifra-XXXXXX")
+            if decrypt_backup_file "$f" "$tmp" "$old" && encrypt_backup_file "$tmp" "$f.cifra" "$new"; then
+                replace_keeping_date "$f" "$f.cifra"
+                n=$((n + 1))
+            else
+                rm -f -- "${f:?}.cifra"
+                echo "Avviso: $(basename "$f") non si apre con la chiave attuale: lasciato com'è"
+            fi
+            rm -f -- "${tmp:?}"
+        done < <(find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -print0)
+    fi
+    save_backup_key "$new"
+    ((n == 0)) || info "Backup locali ricifrati con la nuova chiave: $n"
+}
+
+cmd_backup_chiave() {
+    require_root backup-chiave
+    echo "Chiave dei backup (cifra i backup su questa macchina e quelli remoti; serve per ripristinare altrove):"
+    echo "  $(backup_key)"
+}
+
+cmd_backup_decifra() {
+    require_root backup-decifra
+    local in='' out='' key=''
+    while (($#)); do
+        case $1 in
+            --chiave) [[ $# -ge 2 ]] || die "manca la chiave dopo --chiave"; key=$2; shift 2 ;;
+            -*) die "opzione sconosciuta: $1" ;;
+            *) if [[ -z $in ]]; then in=$1; else out=$1; fi; shift ;;
+        esac
+    done
+    [[ -n $in && -n $out && -f $in ]] || die "uso: sudo emp-server backup-decifra FILE USCITA [--chiave CHIAVE]"
+    [[ ! -e $out ]] || die "$out esiste già"
+    [[ -n $key ]] || key=$(backup_key)
+    valid_backup_key "$key" || die "chiave dei backup non valida (formato EMP-BK-XXXXXX-…)"
+    if ! is_encrypted_backup "$in"; then
+        cp -- "$in" "$out"
+        info "$in non è cifrato: copiato com'è in $out"
+        return 0
+    fi
+    if ! ( umask 077; decrypt_backup_file "$in" "$out" "$key" ); then
+        rm -f -- "${out:?}"
+        die "chiave sbagliata per questo backup (o file danneggiato)"
+    fi
+    info "Backup in chiaro: $out (contiene tutti i dati di EMP: conservarlo con cura)"
 }
 
 installed_server_version() {
@@ -621,12 +762,16 @@ cmd_backup() {
     } > "$work/MANIFEST"
     ( cd "$work" && sha256sum MANIFEST database.sql.gz dati.tar.gz ${package:+"$package"} > SHA256SUMS )
     file="$EMP_BACKUP/$name.tar"
-    tar -C "$work" -cf "$file.parziale" MANIFEST SHA256SUMS database.sql.gz dati.tar.gz ${package:+"$package"}
-    chgrp "$EMP_SCP_GROUP" "$file.parziale" 2>/dev/null || true
-    chmod 0640 "$file.parziale"
+    tar -C "$work" -cf "$work/backup.tar" MANIFEST SHA256SUMS database.sql.gz dati.tar.gz ${package:+"$package"}
+    if ! encrypt_backup_file "$work/backup.tar" "$file.parziale" "$(backup_key)"; then
+        rm -f -- "${file:?}.parziale"
+        die "cifratura del backup non riuscita"
+    fi
+    backup_file_perms "$file.parziale"
     mv "$file.parziale" "$file"
     rm -rf "$work"
-    info "Backup di EMP (Server ${server}, Core ${core}): $file ($(du -h "$file" | cut -f1))"
+    info "Backup di EMP (Server ${server}, Core ${core}), cifrato: $file ($(du -h "$file" | cut -f1))"
+    encrypt_local_backups
 
     # Conserva solo gli ultimi BACKUP_KEEP (anche le cartelle del vecchio formato).
     find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf '%T@ %p\n' | sort -rn \
@@ -689,7 +834,11 @@ remote_details_tsv() {
     printf 'tipo\t%s\n' "$(remote_kind)"
     printf 'dal\t%s\n' "$(remote_connected_epoch)"
     if remote_is_gdrive; then
-        [[ -f $REMOTE_DIR/account ]] && printf 'account\t%s\n' "$(head -c 254 "$REMOTE_DIR/account" | head -n1)"
+        if [[ -f $REMOTE_DIR/account ]]; then
+            printf 'account\t%s\n' "$(head -c 254 "$REMOTE_DIR/account" | head -n1)"
+        elif [[ -f $REMOTE_DIR/account-errore ]]; then
+            printf 'account_errore\t%s\n' "$(head -c 250 "$REMOTE_DIR/account-errore" | head -n1 | tr -d '\t')"
+        fi
         id=$(remote_google_client_id)
         printf 'client\t%s\n' "${id:-predefinito}"
     fi
@@ -715,18 +864,37 @@ remote_connected_epoch() { stat -c %Y "$REMOTE_DIR/destinazione" 2>/dev/null || 
 # $REMOTE_DIR/account. Il permesso drive.file basta per leggere chi è l'utente (Drive API "about").
 gdrive_save_account() {
     remote_is_gdrive || return 1
-    local access json email
+    local access json email code
     # shellcheck disable=SC2016  # codice PHP, non variabili della shell
     access=$(sed -n 's/^token = //p' "$REMOTE_CONF" | head -n1 | php -r '$t = json_decode(stream_get_contents(STDIN), true);
-        $a = is_array($t) ? ($t["access_token"] ?? "") : ""; if (!is_string($a) || !preg_match("/^[A-Za-z0-9._~+\/=-]{10,4096}$/", $a)) { exit(1); } echo $a;') || return 1
+        $a = is_array($t) ? ($t["access_token"] ?? "") : ""; if (!is_string($a) || !preg_match("/^[A-Za-z0-9._~+\/=-]{10,4096}$/", $a)) { exit(1); } echo $a;') \
+        || { account_error "token di Google non leggibile nella configurazione"; return 1; }
     # Il token va a curl dallo standard input, non sulla riga di comando (visibile con ps).
     json=$(printf 'header = "Authorization: Bearer %s"\n' "$access" \
-        | curl -fsS --max-time 15 -K - 'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)' 2>/dev/null) || return 1
+        | curl -sS --max-time 15 -K - -w '\n%{http_code}' 'https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)' 2>&1) \
+        || { account_error "Google non raggiungibile"; return 1; }
+    code=${json##*$'\n'}
+    json=${json%$'\n'*}
+    if [[ $code != 200 ]]; then
+        # Messaggio di Google (es. API non attiva per il client OAuth proprio), senza dati sensibili.
+        # shellcheck disable=SC2016  # codice PHP, non variabili della shell
+        account_error "Google risponde $code: $(php -r '$j = json_decode(stream_get_contents(STDIN), true);
+            echo substr(preg_replace("/[^A-Za-z0-9 .,:;()\/_-]/", "", (string) ($j["error"]["message"] ?? "")), 0, 200);' <<<"$json")"
+        return 1
+    fi
     # shellcheck disable=SC2016  # codice PHP, non variabili della shell
     email=$(php -r '$j = json_decode(stream_get_contents(STDIN), true); $e = $j["user"]["emailAddress"] ?? "";
-        if (!is_string($e) || strlen($e) > 254 || !preg_match("/^[^\s@]+@[^\s@]+$/", $e)) { exit(1); } echo $e;' <<<"$json") || return 1
+        if (!is_string($e) || strlen($e) > 254 || !preg_match("/^[^\s@]+@[^\s@]+$/", $e)) { exit(1); } echo $e;' <<<"$json") \
+        || { account_error "risposta di Google senza indirizzo email"; return 1; }
     printf '%s\n' "$email" > "$REMOTE_DIR/account"
     chmod 0600 "$REMOTE_DIR/account"
+    rm -f -- "$REMOTE_DIR/account-errore"
+}
+
+# Perché l'account non è stato letto (mostrato nella pagina Backup al posto dell'indirizzo).
+account_error() {
+    printf '%s\n' "$1" > "$REMOTE_DIR/account-errore"
+    chmod 0600 "$REMOTE_DIR/account-errore"
 }
 
 new_backup_key() {
@@ -751,10 +919,7 @@ cmd_backup_remoto() {
             else
                 info "Nessuna destinazione remota: sudo emp-server backup-remoto collega gdrive"
             fi ;;
-        chiave)
-            remote_configured || die "nessuna destinazione remota collegata"
-            echo "Chiave dei backup (serve per ripristinare su un'altra macchina):"
-            echo "  $(rclone reveal "$(sed -n 's/^password = //p' "$REMOTE_CONF" | head -n1)")" ;;
+        chiave) cmd_backup_chiave ;;
         scollega)
             rm -rf "$REMOTE_DIR"
             info "Destinazione remota scollegata da questa macchina (i backup già inviati restano dove sono)" ;;
@@ -786,10 +951,11 @@ remote_connect() {
     # Una sola cartella per account: il nome del server è nel nome di ogni file, così una
     # macchina nuova vede i backup di quella vecchia e può ripristinarli.
     folder="EMP-backup"
+    # Una sola chiave per macchina: senza --chiave si usa quella dei backup locali.
     if [[ -n $key ]]; then
-        [[ $key =~ ^EMP-BK(-[A-Z2-7]{6}){5}$ ]] || die "chiave dei backup non valida (formato EMP-BK-XXXXXX-…)"
+        valid_backup_key "$key" || die "chiave dei backup non valida (formato EMP-BK-XXXXXX-…)"
     else
-        key=$(new_backup_key)
+        key=$(backup_key)
     fi
     install -d -m 0700 -o root -g root "$REMOTE_DIR"
     local tmp
@@ -846,8 +1012,9 @@ remote_connect() {
     rclone --config "$tmp" config create emp-cifrato crypt remote="emp-destinazione:$folder" password="$key" \
         filename_encryption=off directory_name_encryption=false --obscure >/dev/null
     chmod 0600 "$tmp"
-    rm -f "$REMOTE_DIR/account"
+    rm -f "$REMOTE_DIR/account" "$REMOTE_DIR/account-errore"
     mv "$tmp" "$REMOTE_CONF"
+    change_backup_key "$key"
     rclone_emp mkdir emp-cifrato: || die "destinazione non raggiungibile"
     info "Destinazione collegata: $(remote_description)"
     if [[ $kind == gdrive ]]; then
@@ -877,13 +1044,21 @@ download_remote() {
     local remote=$1
     [[ $remote =~ ^emp-backup-[a-z0-9.-]+\.tar$ && $remote != *..* ]] || die "nome di backup remoto non valido (vedi: sudo emp-server backup-elenco)"
     remote_configured || die "nessuna destinazione remota collegata (sudo emp-server backup-remoto collega … --chiave CHIAVE)"
-    install -d -m 0700 -o root -g root "$EMP_BACKUP"
+    [[ -d $EMP_BACKUP ]] || install -d -m 0750 -o root -g "$EMP_SCP_GROUP" "$EMP_BACKUP"
     info "Download e decifratura di $remote da $(remote_description)"
     rclone_emp copyto "emp-cifrato:$remote" "$EMP_BACKUP/$remote.parziale" \
         || { rm -f "$EMP_BACKUP/$remote.parziale"; die "download non riuscito (chiave sbagliata o destinazione non raggiungibile)"; }
-    chgrp "$EMP_SCP_GROUP" "$EMP_BACKUP/$remote.parziale" 2>/dev/null || true
-    chmod 0640 "$EMP_BACKUP/$remote.parziale"
-    mv "$EMP_BACKUP/$remote.parziale" "$EMP_BACKUP/$remote"
+    local part="$EMP_BACKUP/$remote.parziale"
+    # Backup remoti precedenti alla 0.6.0-alpha.11: arrivano in chiaro, qui si cifrano subito.
+    if ! is_encrypted_backup "$part"; then
+        if ! encrypt_backup_file "$part" "$part.cifra" "$(backup_key)"; then
+            rm -f -- "${part:?}" "${part:?}.cifra"
+            die "cifratura del backup scaricato non riuscita"
+        fi
+        replace_keeping_date "$part" "$part.cifra"
+    fi
+    backup_file_perms "$part"
+    mv "$part" "$EMP_BACKUP/$remote"
 }
 
 cmd_backup_scarica() {
@@ -907,10 +1082,11 @@ health_ok() {
 
 cmd_ripristina() {
     require_root ripristina
-    local file='' remote='' yes=0
+    local file='' remote='' yes=0 key='' shown=''
     while (($#)); do
         case $1 in
             --remoto) [[ $# -ge 2 ]] || die "manca il nome dopo --remoto"; remote=$2; shift 2 ;;
+            --chiave) [[ $# -ge 2 ]] || die "manca la chiave dopo --chiave"; key=$2; shift 2 ;;
             --si) yes=1; shift ;;
             -*) die "opzione sconosciuta: $1" ;;
             *) file=$1; shift ;;
@@ -924,6 +1100,16 @@ cmd_ripristina() {
 
     local work
     new_temp_dir work "$EMP_DATA"
+    shown=$file
+    # Backup cifrato: si rimette in chiaro (nella cartella temporanea) prima di leggerlo.
+    if is_encrypted_backup "$file"; then
+        [[ -n $key ]] || key=$(backup_key)
+        valid_backup_key "$key" || die "chiave dei backup non valida (formato EMP-BK-XXXXXX-…)"
+        decrypt_backup_file "$file" "$work/backup.tar" "$key" \
+            || die "il backup non si apre con questa chiave (backup di un altro server? usare --chiave CHIAVE)"
+        info "Backup decifrato"
+        file="$work/backup.tar"
+    fi
     tar -C "$work" -xf "$file" MANIFEST SHA256SUMS database.sql.gz dati.tar.gz 2>/dev/null || die "file di backup non valido"
     local package
     package=$(manifest_field "$work" pacchetto)
@@ -942,7 +1128,7 @@ cmd_ripristina() {
     bcore=$(manifest_field "$work" core)
     current=$(installed_server_version)
     echo
-    echo "Backup:      $(basename "$file")"
+    echo "Backup:      $(basename "$shown")"
     echo "             creato il $(manifest_field "$work" creato) sulla macchina $(manifest_field "$work" macchina)"
     echo "             EMP Server ${bserver}, Core ${bcore}"
     echo "Questa macchina: $(host_name), EMP Server ${current:-non installato}"
@@ -1215,7 +1401,7 @@ SQL
     # Identità HTTPS, nome DNS aggiuntivo e destinazione dei backup remoti appartengono alla macchina d'origine.
     # Anche le impostazioni dei backup: il clone riparte da quelle predefinite.
     rm -rf "$EMP_TLS" "$REMOTE_DIR" "$BACKUP_TIMER_DROPIN_DIR"
-    rm -f "$EMP_CONF_DIR/nome-dns" "$BACKUP_CONF" "$EMP_CONF_DIR/avvio.conf"
+    rm -f "$EMP_CONF_DIR/nome-dns" "$BACKUP_CONF" "$EMP_CONF_DIR/avvio.conf" "$BACKUP_KEY_FILE"
     systemctl daemon-reload 2>/dev/null || true
     if [[ -f $EMP_CONF_DIR/github.conf ]]; then
         sed -i -E 's/^EMP_NOME_DNS=.*/EMP_NOME_DNS=/' "$EMP_CONF_DIR/github.conf"
@@ -1318,7 +1504,7 @@ cmd_collega_github() {
 }
 
 usage() {
-    sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -1335,6 +1521,8 @@ main() {
         backup-impostazioni) cmd_backup_impostazioni "$@" ;;
         backup-scarica) cmd_backup_scarica "$@" ;;
         backup-remoto) cmd_backup_remoto "$@" ;;
+        backup-chiave) cmd_backup_chiave ;;
+        backup-decifra) cmd_backup_decifra "$@" ;;
         ripristina) cmd_ripristina "$@" ;;
         accesso-scp) cmd_accesso_scp "$@" ;;
         elimina-vecchio-utente) cmd_elimina_vecchio_utente "$@" ;;

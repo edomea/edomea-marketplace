@@ -19,6 +19,38 @@ const EMP = {
     }
   },
 
+  /**
+   * Marchio white label (nome, colore, logo) nell'intestazione e nel titolo della scheda.
+   * Le pagine scrivono "EMP — …": "EMP" diventa il nome dell'attività.
+   */
+  async applyBrand(brand) {
+    let b = brand;
+    if (!b) {
+      try {
+        b = await EMP.api("marchio");
+      } catch (_) {
+        return;
+      }
+    }
+    document.documentElement.style.setProperty("--emp-blu", b.colore);
+    const title = document.querySelector(".emp-header strong");
+    if (title) {
+      if (!title.dataset.testo) title.dataset.testo = title.textContent.replace(/^EMP\b/, "");
+      title.textContent = b.nome + title.dataset.testo;
+      const old = document.querySelector(".emp-header img.emp-logo");
+      if (old) old.remove();
+      if (b.logo) {
+        const img = document.createElement("img");
+        img.className = "emp-logo";
+        img.alt = "";
+        img.src = "/api/v1/marchio/logo?v=" + encodeURIComponent(b.logo);
+        title.before(img);
+      }
+    }
+    if (!document.documentElement.dataset.titolo) document.documentElement.dataset.titolo = document.title;
+    document.title = document.documentElement.dataset.titolo.replace(/\bEMP\b/, b.nome);
+  },
+
   /** Chiamata alle API del Core. Le richieste che modificano portano X-EMP-Richiesta. */
   async api(path, method = "GET", body = null) {
     const opts = { method, headers: { Accept: "application/json" }, credentials: "same-origin" };
@@ -130,4 +162,7 @@ const EMP = {
   },
 };
 
-document.addEventListener("DOMContentLoaded", () => EMP.showVersion());
+document.addEventListener("DOMContentLoaded", () => {
+  EMP.applyBrand();
+  EMP.showVersion();
+});

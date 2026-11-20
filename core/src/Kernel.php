@@ -6,6 +6,7 @@ namespace Emp\Core;
 
 use Emp\Core\Access\AccessService;
 use Emp\Core\Backup\BackupBridge;
+use Emp\Core\Brand\BrandService;
 use Emp\Core\Http\CsrfGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
@@ -180,6 +181,12 @@ final class Kernel
     public function backup(): ?BackupBridge
     {
         return $this->backupWebDir !== null ? new BackupBridge($this->backupWebDir) : null;
+    }
+
+    /** Marchio white label (nome, colore, logo) mostrato nelle pagine. */
+    public function brand(): BrandService
+    {
+        return new BrandService($this->installer->pdo(), $this->installer->tablePrefix('core_'), $this->clock, $this->audit());
     }
 
     /** Registro di tracciabilità del Core. */

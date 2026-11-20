@@ -9,6 +9,8 @@ use Emp\Core\Access\AccessService;
 use Emp\Core\Access\Role;
 use Emp\Core\Access\User;
 use Emp\Core\Backup\BackupRoutes;
+use Emp\Core\Brand\BrandException;
+use Emp\Core\Brand\BrandService;
 use Emp\Core\Http\AdminGuard;
 use Emp\Core\Http\Request;
 use Emp\Core\Http\Response;
@@ -61,6 +63,13 @@ use Emp\Core\Plugin\PackageException;
  *   POST /api/v1/plugin/github                 {attiva, repository}
  *   GET  /api/v1/plugin/github/release         release pubblicate del repository
  *   POST /api/v1/plugin/github/importa         {tag}: plugin della release → catalogo locale
+ *
+ * Marchio white label (lettura pubblica: serve anche alle pagine di accesso)
+ *   GET  /api/v1/marchio                       {nome, colore, logo: impronta|null}
+ *   GET  /api/v1/marchio/logo                  immagine del logo
+ *   POST /api/v1/marchio                       {nome, colore}  (solo Tecnico, solo HTTPS)
+ *   POST /api/v1/marchio/logo                  immagine PNG/JPEG/WebP nel corpo, max 512 KB  (solo Tecnico, solo HTTPS)
+ *   POST /api/v1/marchio/logo/rimuovi · POST /api/v1/marchio/predefinito  (solo Tecnico, solo HTTPS)
  *
  * Backup (solo Tecnico, solo HTTPS; eseguiti da EMP Server): vedi Backup\BackupRoutes
  *   GET  /api/v1/backup  ·  POST /api/v1/backup/{esegui,impostazioni,destinazione,chiave,scarica,ripristina,…}
@@ -134,6 +143,47 @@ final class CoreModule implements ModuleInterface
                 'recovery_key' => $access()->recoverTecnico($q->input('username'), $q->input('recovery_key'), $q->input('nuova'), $q->remoteAddr),
             ]),
         ));
+
+        // ---- Marchio white label --------------------------------------------------------
+        $r->add('GET', '/api/v1/marchio', $id, static fn (): Response => Response::json($kernel->brand()->get()));
+
+        $r->add('GET', '/api/v1/marchio/logo', $id, static function () use ($kernel): Response {
+            $logo = $kernel->brand()->logo();
+            if ($logo === null) {
+                return Response::error(404, 'Nessun logo');
+            }
+
+            return new Response(200, $logo[1], [
+                'Content-Type' => $logo[0],
+                'Cache-Control' => 'no-cache',
+                'X-Content-Type-Options' => 'nosniff',
+                'Content-Security-Policy' => "default-src 'none'",
+            ]);
+        });
+
+        $brandAction = static fn (Request $q, \Closure $fn): Response => AdminGuard::check($q) ?? self::run(static function () use ($access, $q, $fn, $kernel): Response {
+            $user = self::requireUser($access(), $q, false, Role::TECNICO);
+            try {
+                $fn($kernel->brand(), $user);
+            } catch (BrandException $e) {
+                return Response::error(422, $e->getMessage());
+            }
+
+            return Response::json(['ok' => true, 'marchio' => $kernel->brand()->get()]);
+        });
+        $r->add('POST', '/api/v1/marchio', $id, static fn (Request $q): Response => $brandAction($q,
+            static fn (BrandService $b, User $u) => $b->update($u->username, $q->input('nome'), $q->input('colore'))));
+        $r->add('POST', '/api/v1/marchio/logo', $id, static fn (Request $q): Response => $brandAction($q, static function (BrandService $b, User $u) use ($q): void {
+            $type = strtolower(trim(explode(';', (string) $q->header('content-type'))[0]));
+            if (!in_array($type, ['image/png', 'image/jpeg', 'image/webp'], true)) {
+                throw new BrandException('Inviare un\'immagine PNG, JPEG o WebP');
+            }
+            $b->setLogo($u->username, $q->body);
+        }));
+        $r->add('POST', '/api/v1/marchio/logo/rimuovi', $id, static fn (Request $q): Response => $brandAction($q,
+            static fn (BrandService $b, User $u) => $b->removeLogo($u->username)));
+        $r->add('POST', '/api/v1/marchio/predefinito', $id, static fn (Request $q): Response => $brandAction($q,
+            static fn (BrandService $b, User $u) => $b->reset($u->username)));
 
         // ---- Profilo -----------------------------------------------------------------
         $r->add('GET', '/api/v1/accesso/profilo', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {

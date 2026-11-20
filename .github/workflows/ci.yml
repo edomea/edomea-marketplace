@@ -136,6 +136,12 @@ jobs:
           test "$(code "${J[@]}" -X POST "$B/api/v1/accesso/setup" -d "$BODY_CODE")" = 409
           # Accesso e pagina Plugin: installazione dal web del plugin dimostrativo.
           curl -fsS -c "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Chiave-Sicura-CI-2026"}' | grep -q '"ruolo":"tecnico"'
+          # Marchio white label: lettura pubblica, modifica del Tecnico, colore troppo chiaro rifiutato.
+          curl -fsS --cacert "$CA" -o /dev/null "$B/techadmin/marchio.html"
+          curl -fsS --cacert "$CA" "$B/api/v1/marchio" | jq -e '.predefinito == true and .nome == "EMP"' >/dev/null
+          test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/marchio" -d '{"nome":"Negozio CI","colore":"#ffff00"}')" = 422
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/marchio" -d '{"nome":"Negozio CI","colore":"#0b3d2e"}' | jq -e '.marchio.nome == "Negozio CI"' >/dev/null
+          curl -fsS --cacert "$CA" "$B/api/v1/marchio" | jq -e '.colore == "#0b3d2e" and .predefinito == false' >/dev/null
           # Profilo del Tecnico: visibile, modificabile solo con la password.
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/accesso/profilo" | jq -e '.profilo.username == "tecnico" and .profilo.sessioni_aperte >= 1' >/dev/null
           test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/profilo" -d '{"nome":"X","username":"tecnico","password":"sbagliata"}')" = 403

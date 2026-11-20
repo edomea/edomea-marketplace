@@ -89,22 +89,22 @@ Per copiarlo sulla VM ci sono due modi.
 
 **Dal PC Windows** (PowerShell, nella cartella dove si trova il file). `scp` è già incluso in Windows 11:
 ```
-scp emp-server-0.6.0-alpha.10.tar.gz utente@IP-DEL-SERVER:
+scp emp-server-0.6.0-alpha.11.tar.gz utente@IP-DEL-SERVER:
 ```
 
 **Direttamente sulla VM**, se ha accesso a Internet:
 ```
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.10/emp-server-0.6.0-alpha.10.tar.gz
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.10/emp-server-0.6.0-alpha.10.tar.gz.sha256
-sha256sum -c emp-server-0.6.0-alpha.10.tar.gz.sha256
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.11/emp-server-0.6.0-alpha.11.tar.gz
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.11/emp-server-0.6.0-alpha.11.tar.gz.sha256
+sha256sum -c emp-server-0.6.0-alpha.11.tar.gz.sha256
 ```
 
 ### 2.2 Eseguire l'installazione
 
 Sulla VM, dalla console o via SSH (`ssh utente@IP-DEL-SERVER`):
 ```
-tar -xzf emp-server-0.6.0-alpha.10.tar.gz
-cd emp-server-0.6.0-alpha.10
+tar -xzf emp-server-0.6.0-alpha.11.tar.gz
+cd emp-server-0.6.0-alpha.11
 sudo ./installa.sh
 ```
 
@@ -224,6 +224,8 @@ Sul Server, dalla console o via SSH:
 | `sudo emp-server backup-elenco` | Backup locali e remoti |
 | `sudo emp-server backup-impostazioni` | Orario del backup notturno, attivazione, quanti backup conservare (`--ora 02:30 --notturno si --conserva 14 --conserva-remoti 30`) |
 | `sudo emp-server backup-scarica --remoto NOME` | Copia (decifrata) un backup remoto su questa macchina |
+| `sudo emp-server backup-chiave` | Chiave dei backup (una sola per locali e remoti) |
+| `sudo emp-server backup-decifra FILE USCITA` | Copia in chiaro di un backup cifrato (`--chiave CHIAVE` per un altro server) |
 | `sudo emp-server backup-remoto collega gdrive` | Copia cifrata di ogni backup su Google Drive (anche `sftp`, `locale`) |
 | `sudo emp-server ripristina FILE` / `--remoto NOME` | Rimette EMP com'era nel backup, sulla stessa macchina o su una nuova |
 | `sudo emp-server accesso-scp NOME` | L'utente NOME scarica i backup e carica i plugin via scp (`--togli` per revocare) |
@@ -285,9 +287,11 @@ Tutto si gestisce dalla pagina **Backup** di `/techadmin` (Amministratore Tecnic
 | Esegui un backup adesso | come `sudo emp-server backup` |
 | Pianificazione e conservazione | backup notturno sì/no, orario, quanti backup conservare sulla macchina (1–90) e sulla destinazione remota (1–365) |
 | Copia remota cifrata | collega **Google Drive**, un server **SFTP** o una **cartella** (disco USB o NAS montato sotto `/mnt`, `/media`, `/srv`); mostra la chiave dei backup; scollega. Serve la tua password |
-| Backup su questa macchina e sulla destinazione remota | **Scarica** (il file arriva al PC, non cifrato) e **Ripristina** (scrivere `RIPRISTINA`). Serve la tua password |
+| Backup su questa macchina e sulla destinazione remota | **Scarica** (il file arriva al PC cifrato con la chiave dei backup) e **Ripristina** (scrivere `RIPRISTINA`). Serve la tua password |
 
 **Google Drive dalla pagina, senza SSH:** *Collega* → si apre Google → accedi con l'account dei backup e consenti → il browser finisce su una pagina che non si apre (`http://127.0.0.1:53682/…`): è normale. Copia quell'indirizzo dalla barra e incollalo nella pagina Backup. Alla fine compare la **chiave dei backup**: scaricala in TXT e conservala fuori dalla VM.
+
+**Backup cifrati, una sola chiave.** Dalla 0.6.0-alpha.11 anche i backup su questa macchina (`/var/lib/emp/backup`) sono cifrati, con la stessa **chiave dei backup** della destinazione remota: chi li scarica via scp o dalla pagina senza la chiave non legge nulla. La chiave è della macchina (`/etc/emp/backup-chiave`, solo root) e c'è anche senza destinazione remota: si vede con **Mostra la chiave dei backup** o `sudo emp-server backup-chiave`. I backup in chiaro delle versioni precedenti vengono cifrati al primo backup. Il ripristino li rimette in chiaro da solo; per un backup di un altro server: `sudo emp-server ripristina FILE --chiave CHIAVE`. Copia in chiaro sul Server: `sudo emp-server backup-decifra FILE USCITA`. Sul PC (formato standard di OpenSSL): `openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -in FILE -out chiaro.tar` e poi la chiave come password. Collegando una destinazione con una *chiave dei backup esistente* diversa, i backup locali vengono ricifrati con quella.
 
 **Account Google collegato.** Sotto la destinazione la pagina mostra l'account Google, da quando è collegato e se si usa un client Google proprio. Con **Cambia account / Ricollega** (serve la tua password) si rifà il collegamento a Google **con la stessa chiave dei backup**: con lo stesso account si ritrovano i backup già inviati (es. accesso revocato o scaduto); con un account diverso quelli vecchi restano sull'altro account.
 

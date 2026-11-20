@@ -192,10 +192,25 @@ jobs:
           test -s "$RUNNER_TEMP/chiave-backup"
           sudo emp-server backup
           BK=$(sudo sh -c 'ls -t /var/lib/emp/backup/emp-backup-*.tar' | head -1)
-          sudo tar -tf "$BK" | tee /dev/stderr | grep -q "^emp-server-$(cat server/VERSIONE).tar.gz$"
-          sudo tar -xOf "$BK" MANIFEST | grep -q "^emp_server=$(cat server/VERSIONE)$"
+          # Backup locale cifrato con la stessa chiave della destinazione remota (una sola chiave).
+          test "$(sudo head -c 8 "$BK")" = "Salted__"
+          if sudo tar -tf "$BK" >/dev/null 2>&1; then exit 1; fi
+          sudo emp-server backup-chiave | grep -qF "$(cat "$RUNNER_TEMP/chiave-backup")"
+          sudo emp-server backup-decifra "$BK" "$RUNNER_TEMP/chiaro.tar"
+          if sudo emp-server backup-decifra "$BK" "$RUNNER_TEMP/sbagliata.tar" --chiave EMP-BK-AAAAAA-BBBBBB-CCCCCC-DDDDDD-EEEEEE; then exit 1; fi
+          test ! -e "$RUNNER_TEMP/sbagliata.tar"
+          sudo tar -tf "$RUNNER_TEMP/chiaro.tar" | tee /dev/stderr | grep -q "^emp-server-$(cat server/VERSIONE).tar.gz$"
+          sudo tar -xOf "$RUNNER_TEMP/chiaro.tar" MANIFEST | grep -q "^emp_server=$(cat server/VERSIONE)$"
           # Il backup non contiene l'identità della macchina (certificato e sua chiave).
-          if sudo tar -xOf "$BK" dati.tar.gz | tar -tz | grep -E 'tls|\.key$'; then exit 1; fi
+          if sudo tar -xOf "$RUNNER_TEMP/chiaro.tar" dati.tar.gz | tar -tz | grep -E 'tls|\.key$'; then exit 1; fi
+          # Backup in chiaro di una versione precedente: cifrato al backup successivo, con la sua data.
+          VECCHIO=/var/lib/emp/backup/emp-backup-$(hostname -s | tr '[:upper:]' '[:lower:]')-20200101-000000.tar
+          sudo cp "$RUNNER_TEMP/chiaro.tar" "$VECCHIO"
+          sudo touch -d '2020-01-01 00:00' "$VECCHIO"
+          sudo emp-server backup --solo-locale
+          test "$(sudo head -c 8 "$VECCHIO")" = "Salted__"
+          test "$(sudo stat -c %Y "$VECCHIO")" = "$(date -d '2020-01-01 00:00' +%s)"
+          sudo rm -f "$VECCHIO"
           # Sulla destinazione remota il file è cifrato: non è un archivio leggibile.
           REMOTO=$(sudo sh -c 'ls /srv/emp-remoto/EMP-backup/emp-backup-*.tar.bin' | head -1)
           test -n "$REMOTO"
@@ -205,7 +220,8 @@ jobs:
           sudo useradd -m tecnico-pc
           if sudo -u tecnico-pc cat "$BK" >/dev/null 2>&1; then exit 1; fi
           sudo emp-server accesso-scp tecnico-pc
-          sudo -u tecnico-pc cat "$BK" | tar -t >/dev/null
+          # Via scp si scarica il file, ma è cifrato: senza la chiave non si legge.
+          test "$(sudo -u tecnico-pc head -c 8 "$BK")" = "Salted__"
           sudo -u tecnico-pc tee /var/lib/emp/arrivi/plugin/emp-esempio-0.1.1.zip < "$ZIP" >/dev/null
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin/arrivi" | tee /dev/stderr | grep -q '"nome":"emp-esempio-0.1.1.zip"'
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/arrivi/aggiungi" -d '{"file":"emp-esempio-0.1.1.zip"}' | grep -q '"ok":true'
@@ -263,7 +279,10 @@ jobs:
           sudo rm -f "/var/lib/emp/backup/$REMOTO_NOME"
           TOKEN=$(attendi "$(richiesta scarica "{\"nome\":\"$REMOTO_NOME\",\"origine\":\"remoto\",\"password\":\"Chiave-Sicura-CI-2026\"}")" 300 | jq -er .dati.token)
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" -o "$RUNNER_TEMP/remoto.tar" "$B/api/v1/backup/file/$TOKEN"
-          tar -xOf "$RUNNER_TEMP/remoto.tar" MANIFEST | grep -q "^emp_server=$(cat server/VERSIONE)$"
+          # Anche il file scaricato dalla pagina è cifrato; si apre con la chiave dei backup.
+          test "$(head -c 8 "$RUNNER_TEMP/remoto.tar")" = "Salted__"
+          openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -md sha256 -pass "file:$RUNNER_TEMP/chiave-backup" \
+            -in "$RUNNER_TEMP/remoto.tar" | tar -xO MANIFEST | grep -q "^emp_server=$(cat server/VERSIONE)$"
           # Pagina Sistema: verifica e installazione reale degli aggiornamenti di Ubuntu (apt), con backup prima.
           sistema() { # $1 = operazione, $2 = corpo JSON (facoltativo)
             local body='{}'
@@ -319,7 +338,11 @@ jobs:
           test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 0
           # Backup alterato (database sostituito senza aggiornare le impronte): rifiutato.
           A=$(mktemp -d)
-          sudo sh -c "cd '$A' && tar -xf '$BK' && echo 'DROP DATABASE emp;' | gzip > database.sql.gz && tar -cf alterato.tar MANIFEST SHA256SUMS database.sql.gz dati.tar.gz emp-server-*.tar.gz"
+          # Chiave sbagliata (backup di un altro server): rifiutato senza toccare nulla.
+          if sudo emp-server ripristina "$BK" --si --chiave EMP-BK-AAAAAA-BBBBBB-CCCCCC-DDDDDD-EEEEEE; then exit 1; fi
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 0
+          sudo emp-server backup-decifra "$BK" "$A/chiaro.tar"
+          sudo sh -c "cd '$A' && tar -xf chiaro.tar && echo 'DROP DATABASE emp;' | gzip > database.sql.gz && tar -cf alterato.tar MANIFEST SHA256SUMS database.sql.gz dati.tar.gz emp-server-*.tar.gz"
           if sudo emp-server ripristina "$A/alterato.tar" --si; then exit 1; fi
           sudo emp-server ripristina "$BK" --si
           test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1

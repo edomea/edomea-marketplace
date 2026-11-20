@@ -658,7 +658,7 @@ final class Worker
         $local = [];
         $remote = [];
         $destination = ['collegata' => false, 'descrizione' => null, 'raggiungibile' => null,
-            'tipo' => null, 'dal' => null, 'account' => null, 'client_proprio' => null];
+            'tipo' => null, 'dal' => null, 'account' => null, 'account_errore' => null, 'client_proprio' => null];
         [$rc, $out] = $this->runQuiet(['backup-elenco', '--tsv']);
         foreach ($rc === 0 ? explode("\n", $out) : [] as $line) {
             $f = explode("\t", $line);
@@ -668,12 +668,13 @@ final class Worker
                 $remote[] = ['nome' => $f[1], 'byte' => (int) $f[2], 'data' => (int) $f[3] > 0 ? date(DATE_ATOM, (int) $f[3]) : null];
             } elseif ($f[0] === 'destinazione' && count($f) === 3) {
                 $destination = ['collegata' => true, 'descrizione' => mb_substr($f[1], 0, 200), 'raggiungibile' => $f[2] === '1'] + $destination;
-            } elseif (count($f) === 2 && in_array($f[0], ['tipo', 'dal', 'account', 'client'], true)) {
+            } elseif (count($f) === 2 && in_array($f[0], ['tipo', 'dal', 'account', 'account_errore', 'client'], true)) {
                 $v = mb_substr($f[1], 0, 254);
                 match ($f[0]) {
                     'tipo' => $destination['tipo'] = in_array($v, ['gdrive', 'sftp', 'locale'], true) ? $v : null,
                     'dal' => $destination['dal'] = ctype_digit($v) && $v !== '0' ? date(DATE_ATOM, (int) $v) : null,
                     'account' => $destination['account'] = $v !== '' ? $v : null,
+                    'account_errore' => $destination['account_errore'] = $v !== '' ? $v : null,
                     'client' => $destination['client_proprio'] = $v !== 'predefinito' && preg_match(GOOGLE_CLIENT_ID, $v) ? $v : null,
                 };
             }

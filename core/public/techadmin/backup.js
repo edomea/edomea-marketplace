@@ -101,14 +101,34 @@ function render(data) {
   const s = data.stato || { impostazioni: {}, destinazione: {}, locali: [], remoti: [] };
   const imp = s.impostazioni || {};
   const dest = s.destinazione || {};
-  const all = [...(s.locali || [])].sort((a, b) => (a.data < b.data ? 1 : -1));
-  $("ultimo").textContent = all.length ? fmtDate(all[0].data) + " — " + all[0].nome : "nessuno";
-  $("prossimo").textContent = imp.notturno ? fmtDate(imp.prossimo) + " (ogni notte alle " + imp.ora + ")" : "disattivato";
-  $("remota").textContent = dest.collegata
-    ? dest.descrizione + (dest.raggiungibile ? " — raggiungibile" : " — NON raggiungibile ora")
-    : "non collegata: i backup restano solo su questa macchina";
-  $("remota").className = dest.collegata && dest.raggiungibile ? "stato installato" : "stato non_disponibile";
-  $("aggiornato").textContent = s.aggiornato ? fmtDate(s.aggiornato) + (data.in_coda ? " — " + data.in_coda + " richieste in coda" : "") : "in attesa di EMP Server…";
+  const locali = s.locali || [];
+  const remoti = dest.collegata ? (s.remoti || []) : [];
+
+  // Riepilogo
+  const latest = [...locali, ...remoti].sort((x, y) => (x.data < y.data ? 1 : -1))[0];
+  $("ultimo").textContent = latest ? fmtDate(latest.data) : "nessuno";
+  $("ultimo-dettaglio").textContent = latest ? backupLabel(latest.nome) + " · " + ago(latest.data) : "Esegui il primo backup.";
+  card("ultimo", latest && Date.now() - new Date(latest.data).getTime() < 36 * 3600 * 1000 ? "ok" : "ko");
+
+  $("prossimo").textContent = imp.notturno ? fmtDate(imp.prossimo) : "disattivato";
+  $("prossimo-dettaglio").textContent = imp.notturno ? "ogni notte alle " + imp.ora : "Attivalo in Impostazioni.";
+  card("prossimo", imp.notturno ? "ok" : "ko");
+
+  $("remota").textContent = dest.collegata ? shortDestination(dest) : "non collegata";
+  $("remota-dettaglio").textContent = !dest.collegata
+    ? "I backup restano solo su questo server."
+    : (dest.raggiungibile ? "raggiungibile" + (dest.account ? " · " + dest.account : "") : "NON raggiungibile ora");
+  card("remota", dest.collegata && dest.raggiungibile ? "ok" : "ko");
+
+  const encrypted = locali.filter((x) => x.cifrato).length;
+  const plain = locali.filter((x) => x.cifrato === false).length;
+  $("cifratura").textContent = plain === 0 ? "attiva" : "attiva, " + plain + " da cifrare";
+  $("cifratura-dettaglio").textContent = "Una sola chiave per tutti i backup" + (locali.length ? " · " + encrypted + " su " + locali.length + " cifrati qui" : "");
+  card("cifratura", plain === 0 ? "ok" : "ko");
+
+  $("aggiornato").textContent = s.aggiornato
+    ? "Dati del " + fmtDate(s.aggiornato) + (data.in_coda ? " · " + data.in_coda + " richieste in coda" : "")
+    : "In attesa di EMP Server…";
 
   // Impostazioni: non sovrascrivere mentre l'utente le sta modificando.
   if (!$("impostazioni").contains(document.activeElement)) {
@@ -119,7 +139,6 @@ function render(data) {
   }
 
   // Destinazione
-  $("dest-attuale").textContent = dest.collegata ? "Destinazione: " + dest.descrizione : "Nessuna destinazione remota collegata.";
   renderDestDetails(dest);
   $("dest-azioni").hidden = !dest.collegata;
   $("ricollega").hidden = !(dest.collegata && dest.tipo === "gdrive");
@@ -127,53 +146,100 @@ function render(data) {
     $("collega").hidden = dest.collegata && !$("collega").dataset.cambia;
     $("annulla-collega").hidden = !dest.collegata;
   }
+  // Senza destinazione collegata le impostazioni si aprono da sole: c'è da collegarla.
+  if (!dest.collegata && !$("impostazioni-box").dataset.toccato) $("impostazioni-box").open = true;
 
-  renderList("locali", s.locali || [], "locale", "Nessun backup su questa macchina.");
-  $("remoti-titolo").hidden = !dest.collegata;
-  $("remoti").hidden = !dest.collegata;
-  if (dest.collegata) {
-    renderList("remoti", s.remoti || [], "remoto", dest.raggiungibile ? "Nessun backup sulla destinazione remota." : "Destinazione non raggiungibile ora.");
-  }
+  renderBackups(locali, remoti, dest);
   renderJob(data.lavoro);
+}
+
+function card(id, state) {
+  $(id).closest(".scheda").className = "scheda " + state;
+}
+
+function shortDestination(dest) {
+  if (dest.tipo === "gdrive") return "Google Drive";
+  if (dest.tipo === "sftp") return "Server SFTP";
+  if (dest.tipo === "locale") return "Cartella";
+  return dest.descrizione || "collegata";
+}
+
+/** "3 ore fa", "ieri", "5 giorni fa". */
+function ago(iso) {
+  const min = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (min < 2) return "adesso";
+  if (min < 60) return min + " minuti fa";
+  const h = Math.round(min / 60);
+  if (h < 24) return h + (h === 1 ? " ora fa" : " ore fa");
+  const d = Math.round(h / 24);
+  return d === 1 ? "ieri" : d + " giorni fa";
+}
+
+/** Tipo del backup dal nome del file (etichetta messa da EMP Server). */
+function backupLabel(name) {
+  const m = /^emp-backup-.+-\d{8}-\d{6}(?:-(.+))?\.tar$/.exec(name);
+  const label = m && m[1] ? m[1] : "";
+  if (label === "") return "Backup";
+  if (label === "prima-del-ripristino") return "Prima di un ripristino";
+  if (label === "prima-di-aggiornamenti-ubuntu") return "Prima degli aggiornamenti di Ubuntu";
+  const v = /^prima-di-(.+)$/.exec(label);
+  if (v) return "Prima dell'aggiornamento a " + v[1];
+  return label;
 }
 
 // Account Google collegato, da quando e con quale client (mai il Client Secret).
 function renderDestDetails(dest) {
-  const list = $("dest-dettagli");
-  const rows = [];
-  if (dest.collegata && dest.tipo === "gdrive") {
-    rows.push("Account Google: " + (dest.account
-      || (dest.account_errore ? "non letto — " + dest.account_errore + ". Usa \"Cambia account / Ricollega\"."
-        : "non ancora letto: clicca Aggiorna")));
-  }
-  if (dest.collegata && dest.dal) rows.push("Collegata dal " + fmtDate(dest.dal));
-  if (dest.collegata && dest.tipo === "gdrive") {
-    rows.push("Client Google: " + (dest.client_proprio ? "proprio (" + dest.client_proprio + ")" : "predefinito"));
-  }
-  list.replaceChildren(...rows.map((t) => el("li", t)));
-  list.hidden = rows.length === 0;
+  $("dest-attuale").textContent = dest.collegata
+    ? dest.descrizione + (dest.raggiungibile ? " — raggiungibile" : " — NON raggiungibile ora")
+    : "nessuna: i backup restano solo su questo server";
+  const gdrive = dest.collegata && dest.tipo === "gdrive";
+  $("dest-riga-account").hidden = !gdrive;
+  $("dest-account").textContent = dest.account
+    || (dest.account_errore ? "non letto — " + dest.account_errore + ". Usa \"Cambia account / Ricollega\"." : "non ancora letto: clicca Aggiorna");
+  $("dest-riga-dal").hidden = !(dest.collegata && dest.dal);
+  $("dest-dal").textContent = dest.dal ? fmtDate(dest.dal) : "";
+  $("dest-riga-client").hidden = !gdrive;
+  $("dest-client").textContent = dest.client_proprio ? "proprio (" + dest.client_proprio + ")" : "predefinito";
 }
 
-function renderList(table, items, origin, empty) {
-  const body = $(table).querySelector("tbody");
+/** Un solo elenco: ogni backup una riga, con dove si trova (questo server, destinazione remota o entrambi). */
+function renderBackups(locali, remoti, dest) {
+  const body = $("elenco").querySelector("tbody");
   body.replaceChildren();
-  if (items.length === 0) {
+  const byName = new Map();
+  for (const x of locali) byName.set(x.nome, { nome: x.nome, data: x.data, byte: x.byte, locale: true, remoto: false });
+  for (const x of remoti) {
+    const row = byName.get(x.nome) || { nome: x.nome, data: x.data, byte: x.byte, locale: false, remoto: false };
+    row.remoto = true;
+    byName.set(x.nome, row);
+  }
+  const rows = [...byName.values()].sort((x, y) => (x.data < y.data ? 1 : -1));
+  if (rows.length === 0) {
     const tr = el("tr");
-    const td = el("td", empty);
-    td.colSpan = 4;
+    const td = el("td", dest.collegata && !dest.raggiungibile ? "Nessun backup su questo server; destinazione remota non raggiungibile ora." : "Nessun backup.");
+    td.colSpan = 5;
     tr.appendChild(td);
     body.appendChild(tr);
     return;
   }
-  for (const b of items) {
+  const remoteName = shortDestination(dest);
+  for (const b of rows) {
     const tr = el("tr");
-    tr.appendChild(el("td", b.nome));
     tr.appendChild(el("td", fmtDate(b.data)));
+    const type = el("td", backupLabel(b.nome));
+    type.appendChild(el("small", b.nome));
+    tr.appendChild(type);
+    const where = el("td");
+    if (b.locale) where.appendChild(el("span", "Server", "etichetta-dove"));
+    if (b.remoto) where.appendChild(el("span", remoteName, "etichetta-dove"));
+    tr.appendChild(where);
     tr.appendChild(el("td", fmtSize(b.byte)));
+    // Si usa la copia su questo server se c'è (più veloce), altrimenti quella remota.
+    const origin = b.locale ? "locale" : "remoto";
     const td = el("td");
     const reset = () => td.replaceChildren(
-      button("Scarica", "secondario", () => askPassword(td, "Scarica " + b.nome, false, (pw) => download(b, origin, pw), reset)),
-      button("Ripristina", "conferma", () => askPassword(td, "Ripristina " + b.nome, true, (pw) => restore(b, origin, pw), reset)),
+      button("Scarica", "secondario piccolo", () => askPassword(td, "Scarica il backup del " + fmtDate(b.data), false, (pw) => download(b, origin, pw), reset)),
+      button("Ripristina", "pericolo piccolo", () => askPassword(td, "Ripristina il backup del " + fmtDate(b.data), true, (pw) => restore(b, origin, pw), reset)),
     );
     reset();
     tr.appendChild(td);
@@ -183,7 +249,10 @@ function renderList(table, items, origin, empty) {
 
 function renderJob(job) {
   const box = $("lavoro");
-  if (!job) {
+  // Qui solo le operazioni dei backup: gli aggiornamenti di Ubuntu stanno nella pagina Sistema.
+  // Un'operazione finita si mostra per 10 minuti, poi sparisce.
+  const recent = job && (!job.finito || Date.now() - new Date(job.finito).getTime() < 10 * 60000);
+  if (!job || String(job.azione || "").startsWith("sistema_") || !recent) {
     box.hidden = true;
     return;
   }
@@ -192,6 +261,7 @@ function renderJob(job) {
   const running = !job.finito;
   $("lavoro-stato").textContent = running ? "in corso…" : (job.esito === 0 ? "completato" : (job.esito === 3 ? "completato, copia remota non riuscita" : "non riuscito"));
   $("lavoro-stato").className = "stato " + (running ? "" : (job.esito === 0 ? "installato" : "non_disponibile"));
+  $("lavoro-dettagli").open = running || (job.esito !== 0 && job.esito !== null);
   const pre = $("lavoro-righe");
   pre.textContent = (job.righe || []).join("\n");
   pre.scrollTop = pre.scrollHeight;
@@ -337,6 +407,8 @@ function showType() {
   for (const e of $("collega").querySelectorAll("[data-tipo]")) e.hidden = e.dataset.tipo !== type;
 }
 for (const r of document.querySelectorAll("#collega input[name=tipo]")) r.addEventListener("change", showType);
+
+$("impostazioni-box").addEventListener("toggle", () => { $("impostazioni-box").dataset.toccato = "1"; });
 
 $("cambia-dest").addEventListener("click", () => {
   $("collega").dataset.cambia = "1";

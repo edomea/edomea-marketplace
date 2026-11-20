@@ -39,8 +39,9 @@ use Emp\Core\Plugin\PackageException;
  *   POST /api/v1/accesso/profilo               {password, nome, username}: modifica del proprio profilo
  *   POST /api/v1/accesso/sessioni/chiudi-altre {password}: chiude le altre sessioni del proprio account
  *
- * Utenti (Tecnico → amministratori, amministratori → operatori)
- *   GET  /api/v1/utenti
+ * Utenti (Tecnico → amministratori e operatori, amministratori → operatori)
+ *   GET  /api/v1/utenti                        anche i ruoli di ogni operatore
+ *   POST /api/v1/utenti/{id}/ruoli             {ruoli: [codici]}: ruoli di un operatore
  *   POST /api/v1/utenti                        crea con password temporanea
  *   POST /api/v1/utenti/{id}/modifica          {nome, username}
  *   POST /api/v1/utenti/{id}/password          password temporanea
@@ -64,6 +65,13 @@ use Emp\Core\Plugin\PackageException;
  *   POST /api/v1/plugin/github                 {attiva, repository}
  *   GET  /api/v1/plugin/github/release         release pubblicate del repository
  *   POST /api/v1/plugin/github/importa         {tag}: plugin della release → catalogo locale
+ *
+ * Ruoli di negozio con permessi (Tecnico e amministratori)
+ *   GET  /api/v1/ruoli                         ruoli, permessi disponibili (dichiarati dai moduli avviati)
+ *   POST /api/v1/ruoli                         {nome, descrizione, permessi}: nuovo ruolo
+ *   POST /api/v1/ruoli/{codice}                {nome, descrizione, permessi}: modifica
+ *   POST /api/v1/ruoli/{codice}/elimina        solo se non è assegnato a nessuno
+ *   GET  /api/v1/accesso/permessi              i permessi dell'utente collegato
  *
  * Postazioni autorizzate (gestione: Tecnico e amministratori, solo HTTPS; obbligo: solo il Tecnico)
  *   GET  /api/v1/postazioni/questa             {postazione: {nome}|null, obbligatorie} (pubblica)
@@ -277,20 +285,69 @@ final class CoreModule implements ModuleInterface
         }));
 
         // ---- Utenti -----------------------------------------------------------------
-        $r->add('GET', '/api/v1/utenti', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
+        $r->add('GET', '/api/v1/utenti', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
             $actor = self::requireUser($access(), $q);
+            $assigned = $kernel->jobRoles()->assignmentsByUser();
 
             return Response::json([
                 'gestibile' => Role::managedBy($actor->role),
-                'utenti' => array_map(static fn (User $u): array => $u->toArray(), $access()->listUsers($actor)),
+                'gestibili' => Role::managedRoles($actor->role),
+                'utenti' => array_map(static fn (User $u): array => $u->toArray() + ['ruoli' => $assigned[$u->id] ?? []], $access()->listUsers($actor)),
             ]);
         }));
 
-        $r->add('POST', '/api/v1/utenti', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
+        $r->add('POST', '/api/v1/utenti', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
             $actor = self::requireUser($access(), $q);
             $user = $access()->createUser($actor, $q->input('username'), $q->input('nome'), $q->input('ruolo'), $q->input('password'));
+            $roles = self::list($q, 'ruoli');
+            if ($roles !== [] && $user->role === Role::OPERATORE) {
+                $kernel->jobRoles()->assign($actor, $user, $roles);
+            }
 
             return Response::json(['utente' => $user->toArray()], 201);
+        }));
+
+        $r->add('POST', '/api/v1/utenti/{id}/ruoli', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
+            $actor = self::requireUser($access(), $q);
+            $target = $access()->manageable($actor, $q->param('id'));
+            $kernel->jobRoles()->assign($actor, $target, self::list($q, 'ruoli'));
+
+            return Response::json(['ok' => true, 'messaggio' => 'Ruoli di ' . $target->username . ' aggiornati.']);
+        }));
+
+        // ---- Ruoli di negozio ---------------------------------------------------------
+        $r->add('GET', '/api/v1/ruoli', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
+            $actor = self::requireUser($access(), $q);
+            if (!in_array($actor->role, [Role::TECNICO, Role::AMMINISTRATORE], true)) {
+                throw new AccessException('Ruoli e permessi li gestiscono il Tecnico e gli amministratori', 403);
+            }
+            $roles = $kernel->jobRoles();
+
+            return Response::json(['ruoli' => $roles->list(), 'permessi' => $roles->catalog()]);
+        }));
+
+        $r->add('POST', '/api/v1/ruoli', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
+            $code = $kernel->jobRoles()->save(self::requireUser($access(), $q), null, $q->input('nome'), $q->input('descrizione'), self::list($q, 'permessi'));
+
+            return Response::json(['ok' => true, 'codice' => $code, 'messaggio' => 'Ruolo creato.'], 201);
+        }));
+
+        $r->add('POST', '/api/v1/ruoli/{codice}', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
+            $kernel->jobRoles()->save(self::requireUser($access(), $q), $q->param('codice'), $q->input('nome'), $q->input('descrizione'), self::list($q, 'permessi'));
+
+            return Response::json(['ok' => true, 'messaggio' => 'Ruolo aggiornato.']);
+        }));
+
+        $r->add('POST', '/api/v1/ruoli/{codice}/elimina', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
+            $kernel->jobRoles()->delete(self::requireUser($access(), $q), $q->param('codice'));
+
+            return Response::json(['ok' => true, 'messaggio' => 'Ruolo eliminato.']);
+        }));
+
+        $r->add('GET', '/api/v1/accesso/permessi', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
+            $user = self::requireUser($access(), $q);
+
+            return Response::json(['permessi' => $kernel->jobRoles()->permissionsFor($user)]);
         }));
 
         $r->add('POST', '/api/v1/utenti/{id}/modifica', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
@@ -527,6 +584,17 @@ final class CoreModule implements ModuleInterface
     }
 
     /** @param \Closure(): Response $action */
+    /** @return list<string> lista di stringhe dal corpo JSON (campo assente o non valido: lista vuota) */
+    private static function list(Request $q, string $field): array
+    {
+        $v = $q->json()[$field] ?? [];
+        if (!is_array($v)) {
+            return [];
+        }
+
+        return array_values(array_filter($v, 'is_string'));
+    }
+
     private static function run(\Closure $action): Response
     {
         try {

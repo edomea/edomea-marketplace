@@ -150,6 +150,11 @@ jobs:
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/postazioni/obbligo" -d '{"attivo":true}' | jq -e .ok >/dev/null
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/postazioni" | jq -e '.obbligatorie and (.postazioni | length) == 1' >/dev/null
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/postazioni/obbligo" -d '{"attivo":false}' | jq -e .ok >/dev/null
+          # Ruoli di negozio: quelli del manuale, operatore creato dal Tecnico con i suoi ruoli.
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/ruoli" | jq -e '[.ruoli[].codice] | index("cassiere") != null and index("magazziniere") != null' >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/utenti" \
+            -d '{"username":"cassa.ci","nome":"Cassa CI","password":"Temporanea-Cassa-CI","ruolo":"operatore","ruoli":["cassiere"]}' | jq -e '.utente.ruolo == "operatore"' >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/utenti" | jq -e '.utenti[] | select(.username == "cassa.ci") | .ruoli == ["cassiere"]' >/dev/null
           # Profilo del Tecnico: visibile, modificabile solo con la password.
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/accesso/profilo" | jq -e '.profilo.username == "tecnico" and .profilo.sessioni_aperte >= 1' >/dev/null
           test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/profilo" -d '{"nome":"X","username":"tecnico","password":"sbagliata"}')" = 403
@@ -367,7 +372,7 @@ jobs:
           sudo sh -c "cd '$A' && tar -xf chiaro.tar && echo 'DROP DATABASE emp;' | gzip > database.sql.gz && tar -cf alterato.tar MANIFEST SHA256SUMS database.sql.gz dati.tar.gz emp-server-*.tar.gz"
           if sudo emp-server ripristina "$A/alterato.tar" --si; then exit 1; fi
           sudo emp-server ripristina "$BK" --si
-          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users WHERE username = "tecnico"')" = 1
           sudo emp-server moduli | grep -q emp-esempio
           curl -fsS --cacert "$RUNNER_TEMP/emp-ca.crt" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json' \
             -X POST "https://localhost/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
@@ -382,7 +387,7 @@ jobs:
           sudo test -f /etc/emp/tls/ca.key
           sudo ./installa.sh > /dev/null
           sudo emp-server moduli | grep -q emp-esempio
-          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users WHERE username = "tecnico"')" = 1
       - name: Total reset di un clone (azzera)
         run: |
           set -euo pipefail
@@ -393,7 +398,7 @@ jobs:
           # Senza terminale e senza --si rifiuta; nome non valido rifiutato. Nessuna modifica.
           if sudo EMP_RUNNER_DIR="$FINTO" emp-server azzera --nome cliente-prova </dev/null; then exit 1; fi
           if sudo emp-server azzera --nome -x --si; then exit 1; fi
-          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users WHERE username = "tecnico"')" = 1
           test -e "$FINTO/.runner"
           sudo EMP_RUNNER_DIR="$FINTO" emp-server azzera --nome cliente-prova --si | tee "$RUNNER_TEMP/azzera.log"
           # Identità nuova, dati e collegamento GitHub tolti.
@@ -432,7 +437,7 @@ jobs:
           sudo emp-server backup-remoto collega locale /srv/emp-remoto --chiave "$(cat "$RUNNER_TEMP/chiave-backup")"
           sudo emp-server ripristina --remoto "$ORIG" --si | tee "$RUNNER_TEMP/ripristino.log"
           # Dati del server originale; identità (nome, certificato) della macchina nuova.
-          test "$(sudo mariadb -N -e 'SELECT username FROM emp.emp_core_users')" = tecnico
+          test "$(sudo mariadb -N -e 'SELECT username FROM emp.emp_core_users WHERE role = "tecnico"')" = tecnico
           sudo emp-server moduli | grep -q emp-esempio
           test "$(hostname -s)" = cliente-prova
           test "$(sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -fingerprint -sha256)" = "$NEW_FP"

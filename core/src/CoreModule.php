@@ -8,6 +8,7 @@ use Emp\Core\Access\AccessException;
 use Emp\Core\Access\AccessService;
 use Emp\Core\Access\Role;
 use Emp\Core\Access\User;
+use Emp\Core\Access\WorkstationService;
 use Emp\Core\Backup\BackupRoutes;
 use Emp\Core\Brand\BrandException;
 use Emp\Core\Brand\BrandService;
@@ -64,6 +65,16 @@ use Emp\Core\Plugin\PackageException;
  *   GET  /api/v1/plugin/github/release         release pubblicate del repository
  *   POST /api/v1/plugin/github/importa         {tag}: plugin della release → catalogo locale
  *
+ * Postazioni autorizzate (gestione: Tecnico e amministratori, solo HTTPS; obbligo: solo il Tecnico)
+ *   GET  /api/v1/postazioni/questa             {postazione: {nome}|null, obbligatorie} (pubblica)
+ *   POST /api/v1/postazioni/associa            {codice}: sulla postazione, con il codice di associazione
+ *   GET  /api/v1/postazioni                    elenco, obbligo
+ *   POST /api/v1/postazioni/questa             {nome}: autorizza il browser in uso
+ *   POST /api/v1/postazioni/codice             {nome}: codice di associazione monouso (30 minuti)
+ *   POST /api/v1/postazioni/{id}/rinomina      {nome}
+ *   POST /api/v1/postazioni/{id}/revoca        chiude anche le sessioni aperte da lì
+ *   POST /api/v1/postazioni/obbligo            {attivo}: operatori solo dalle postazioni autorizzate
+ *
  * Marchio white label (lettura pubblica: serve anche alle pagine di accesso)
  *   GET  /api/v1/marchio                       {nome, colore, logo: impronta|null}
  *   GET  /api/v1/marchio/logo                  immagine del logo
@@ -119,8 +130,9 @@ final class CoreModule implements ModuleInterface
             ]),
         ));
 
-        $r->add('POST', '/api/v1/accesso/login', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
-            [$token, $user] = $access()->login($q->input('username'), $q->input('password'), $q->remoteAddr);
+        $r->add('POST', '/api/v1/accesso/login', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q, $kernel): Response {
+            [$token, $user] = $access()->login($q->input('username'), $q->input('password'), $q->remoteAddr,
+                $kernel->workstations(), $q->cookie(WorkstationService::COOKIE));
 
             return Response::json(['utente' => $user->toArray()])->withHeader('Set-Cookie', self::cookie($token, $q, AccessService::SESSION_HOURS * 3600));
         }));
@@ -143,6 +155,64 @@ final class CoreModule implements ModuleInterface
                 'recovery_key' => $access()->recoverTecnico($q->input('username'), $q->input('recovery_key'), $q->input('nuova'), $q->remoteAddr),
             ]),
         ));
+
+        // ---- Postazioni autorizzate ------------------------------------------------------
+        $ws = static fn () => $kernel->workstations();
+        $wsCookie = static fn (string $token, Request $q): string => WorkstationService::COOKIE . '=' . $token . '; Path=/; Max-Age='
+            . (WorkstationService::COOKIE_DAYS * 86400) . '; HttpOnly; SameSite=Strict' . ($q->isSecure() ? '; Secure' : '');
+
+        $r->add('GET', '/api/v1/postazioni/questa', $id, static fn (Request $q): Response => self::run(static function () use ($ws, $q): Response {
+            $p = $ws()->identify($q->cookie(WorkstationService::COOKIE), null);
+
+            return Response::json(['postazione' => $p !== null ? ['nome' => $p['nome']] : null, 'obbligatorie' => $ws()->isRequired()]);
+        }));
+
+        $r->add('POST', '/api/v1/postazioni/associa', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($ws, $q, $wsCookie): Response {
+            [$token, $name] = $ws()->pair($q->input('codice'), $q->remoteAddr);
+
+            return Response::json(['ok' => true, 'messaggio' => 'Postazione "' . $name . '" autorizzata.'])->withHeader('Set-Cookie', $wsCookie($token, $q));
+        }));
+
+        $r->add('GET', '/api/v1/postazioni', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($access, $ws, $q): Response {
+            $user = self::requireUser($access(), $q);
+            if (!in_array($user->role, [Role::TECNICO, Role::AMMINISTRATORE], true)) {
+                throw new AccessException('Le postazioni le gestiscono il Tecnico e gli amministratori', 403);
+            }
+
+            return Response::json(['postazioni' => $ws()->list($q->cookie(WorkstationService::COOKIE)), 'obbligatorie' => $ws()->isRequired(),
+                'puo_cambiare_obbligo' => $user->role === Role::TECNICO, 'codice_minuti' => WorkstationService::CODE_MINUTES]);
+        }));
+
+        $r->add('POST', '/api/v1/postazioni/questa', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($access, $ws, $q, $wsCookie): Response {
+            $token = $ws()->authorizeCurrent(self::requireUser($access(), $q), $q->input('nome'), $q->remoteAddr);
+
+            return Response::json(['ok' => true, 'messaggio' => 'Questa postazione è autorizzata.'])->withHeader('Set-Cookie', $wsCookie($token, $q));
+        }));
+
+        $r->add('POST', '/api/v1/postazioni/codice', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static fn (): Response => Response::json(
+            ['ok' => true] + $ws()->createCode(self::requireUser($access(), $q), $q->input('nome')),
+        )));
+
+        $r->add('POST', '/api/v1/postazioni/{id}/rinomina', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($access, $ws, $q): Response {
+            $ws()->rename(self::requireUser($access(), $q), $q->param('id'), $q->input('nome'));
+
+            return Response::json(['ok' => true, 'messaggio' => 'Postazione rinominata.']);
+        }));
+
+        $r->add('POST', '/api/v1/postazioni/{id}/revoca', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($access, $ws, $q): Response {
+            $n = $ws()->revoke(self::requireUser($access(), $q), $q->param('id'));
+
+            return Response::json(['ok' => true, 'messaggio' => 'Postazione revocata' . ($n > 0 ? ": sessioni chiuse {$n}." : '.')]);
+        }));
+
+        $r->add('POST', '/api/v1/postazioni/obbligo', $id, static fn (Request $q): Response => AdminGuard::check($q) ?? self::run(static function () use ($access, $ws, $q): Response {
+            $on = ($q->json()['attivo'] ?? false) === true;
+            $ws()->setRequired(self::requireUser($access(), $q), $on);
+
+            return Response::json(['ok' => true, 'messaggio' => $on
+                ? 'Da ora gli operatori accedono solo dalle postazioni autorizzate.'
+                : 'Gli operatori possono accedere da qualsiasi postazione.']);
+        }));
 
         // ---- Marchio white label --------------------------------------------------------
         $r->add('GET', '/api/v1/marchio', $id, static fn (): Response => Response::json($kernel->brand()->get()));

@@ -6,13 +6,19 @@
 
 const EMP = {
   /** Versioni installate in fondo a ogni pagina (EMP Server e Core). */
-  async showVersion() {
-    const footer = document.createElement("footer");
-    footer.className = "emp-versione";
-    document.body.appendChild(footer);
+  async showVersion(refresh = false) {
+    let footer = document.querySelector("footer.emp-versione");
+    if (!footer) {
+      footer = document.createElement("footer");
+      footer.className = "emp-versione";
+      document.body.appendChild(footer);
+    } else if (!refresh) {
+      return;
+    }
     try {
-      const s = await EMP.api("salute");
+      const [s, p] = await Promise.all([EMP.api("salute"), EMP.api("postazioni/questa").catch(() => null)]);
       footer.textContent = (s.server ? "EMP Server " + s.server + " · " : "") + "Core " + s.core
+        + (p && p.postazione ? " · Postazione: " + p.postazione.nome : "")
         + (s.avvio_sicuro ? " · AVVIO SICURO: plugin fermi (sudo emp-server avvio-sicuro --fine)" : "");
     } catch (_) {
       footer.textContent = "Versione non disponibile";

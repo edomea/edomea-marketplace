@@ -179,7 +179,7 @@ final class AccessService
     // ------------------------------------------------------------------ sessioni
 
     /** @return array{0: string, 1: User} token di sessione (da mettere nel cookie) e utente */
-    public function login(string $username, string $password, string $ip): array
+    public function login(string $username, string $password, string $ip, ?WorkstationService $workstations = null, ?string $workstationToken = null): array
     {
         $username = strtolower(trim($username));
         $this->assertNotLocked($username, $ip, 'login');
@@ -191,15 +191,21 @@ final class AccessService
             $this->audit->record($username !== '' ? $username : '(vuoto)', self::MODULE, 'accesso_rifiutato', 'utente', $row['id'] ?? '-', 0);
             throw new AccessException('Nome utente o password non corretti', 401);
         }
+        // Operatori: solo da una postazione autorizzata, se il Tecnico lo ha reso obbligatorio.
+        $workstation = $workstations?->identify($workstationToken, $ip);
+        if ($workstations !== null && $workstation === null && $workstations->requiredFor((string) $row['role'])) {
+            $this->audit->record($username, self::MODULE, 'accesso_postazione_non_autorizzata', 'utente', (string) $row['id'], 0, null, $ip);
+            throw new AccessException('Accesso consentito solo dalle postazioni autorizzate del negozio: chiedere all\'amministratore di autorizzare questa postazione', 403);
+        }
         $this->recordAttempt($username, $ip, 'login', true);
         if (password_needs_rehash((string) $row['password_hash'], self::algorithm())) {
             $this->pdo->prepare("UPDATE {$this->users} SET password_hash = ? WHERE id = ?")->execute([self::hash($password), $row['id']]);
         }
         $token = bin2hex(random_bytes(32));
         $now = $this->clock->now();
-        $this->pdo->prepare("INSERT INTO {$this->sessions} (token_hash, user_id, created_at, last_seen_at, expires_at, revoked_at, ip) VALUES (?, ?, ?, ?, ?, NULL, ?)")
-            ->execute([hash('sha256', $token), $row['id'], $now->format('Y-m-d H:i:s'), $now->format('Y-m-d H:i:s'), $now->modify('+' . self::SESSION_HOURS . ' hours')->format('Y-m-d H:i:s'), substr($ip, 0, 45)]);
-        $this->audit->record($username, self::MODULE, 'accesso', 'utente', (string) $row['id'], 0);
+        $this->pdo->prepare("INSERT INTO {$this->sessions} (token_hash, user_id, created_at, last_seen_at, expires_at, revoked_at, ip, postazione_id) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)")
+            ->execute([hash('sha256', $token), $row['id'], $now->format('Y-m-d H:i:s'), $now->format('Y-m-d H:i:s'), $now->modify('+' . self::SESSION_HOURS . ' hours')->format('Y-m-d H:i:s'), substr($ip, 0, 45), $workstation['id'] ?? null]);
+        $this->audit->record($username, self::MODULE, 'accesso', 'utente', (string) $row['id'], 0, null, $workstation !== null ? 'postazione ' . $workstation['nome'] : null);
 
         return [$token, User::fromRow($row)];
     }

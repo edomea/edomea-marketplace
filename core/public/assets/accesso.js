@@ -13,7 +13,7 @@ const RUOLI = { amministratore: "Amministratore", operatore: "Operatore" };
 let current = null;
 
 function show(ids) {
-  for (const id of ["login-box", "password-box", "links-box", "profile-box", "users-box"]) {
+  for (const id of ["login-box", "password-box", "links-box", "profile-box", "ws-box", "users-box"]) {
     if ($(id)) $(id).hidden = !ids.includes(id);
   }
   $("logout").hidden = !current;
@@ -52,8 +52,129 @@ async function load() {
   if ($("link-sistema")) $("link-sistema").hidden = current.ruolo !== "tecnico";
   if ($("link-marchio")) $("link-marchio").hidden = current.ruolo !== "tecnico";
   show(["links-box", "profile-box"]);
-  await Promise.all([loadProfile(), loadUsers()]);
+  await Promise.all([loadProfile(), loadUsers(), loadWorkstations()]);
 }
+
+// ---- Postazioni autorizzate ---------------------------------------------------------------------
+
+const WS_STATI = { attiva: "Autorizzata", in_attesa: "Codice in attesa", revocata: "Revocata" };
+
+async function loadWorkstations() {
+  if (!current || (current.ruolo !== "tecnico" && current.ruolo !== "amministratore")) return;
+  let data;
+  try {
+    data = await EMP.api("postazioni");
+  } catch (e) {
+    // Senza HTTPS la gestione delle postazioni non è disponibile: il riquadro resta nascosto.
+    return;
+  }
+  $("ws-box").hidden = false;
+  $("ws-obbligo-riga").hidden = !data.puo_cambiare_obbligo;
+  $("ws-obbligo").checked = data.obbligatorie;
+  $("ws-obbligo-stato").textContent = data.obbligatorie
+    ? "Obbligo attivo: gli operatori entrano solo dalle postazioni autorizzate."
+    : "Obbligo non attivo: gli operatori possono entrare da qualsiasi postazione.";
+  const here = data.postazioni.find((p) => p.questa);
+  $("ws-questa").textContent = here ? here.nome : "non autorizzata";
+  const body = $("ws").querySelector("tbody");
+  body.replaceChildren();
+  for (const p of data.postazioni) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = p.nome + (p.questa ? " (questa)" : "");
+    const state = document.createElement("td");
+    state.textContent = WS_STATI[p.stato] || p.stato;
+    if (p.stato === "in_attesa") state.textContent += " fino alle " + fmtDb(p.codice_scade).slice(11);
+    if (p.stato === "revocata") state.textContent += " il " + fmtDb(p.revocata_il);
+    const used = document.createElement("td");
+    used.textContent = p.ultimo_uso ? fmtDb(p.ultimo_uso) + " da " + p.ultimo_ip : "—";
+    const actions = document.createElement("td");
+    if (p.stato !== "revocata") {
+      actions.append(
+        action("Rinomina", "secondario", () => renameWorkstation(actions, p)),
+        action("Revoca", "conferma", () => confirmIn(actions, "Revocare " + p.nome + "? Le sessioni aperte da lì si chiudono.",
+          () => wsPost("postazioni/" + p.id + "/revoca"))),
+      );
+    }
+    tr.append(name, state, used, actions);
+    body.appendChild(tr);
+  }
+  if (data.postazioni.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.textContent = "Nessuna postazione autorizzata.";
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
+}
+
+function renameWorkstation(td, p) {
+  const input = Object.assign(document.createElement("input"), { value: p.nome, maxLength: 64, autocomplete: "off" });
+  td.replaceChildren(input, action("Salva", "", () => wsPost("postazioni/" + p.id + "/rinomina", { nome: input.value })),
+    action("Annulla", "secondario", () => loadWorkstations()));
+  input.focus();
+}
+
+async function wsPost(path, body) {
+  try {
+    const out = await EMP.api(path, "POST", body || {});
+    if (out.messaggio) EMP.toast(out.messaggio);
+    await loadWorkstations();
+    return out;
+  } catch (e) {
+    EMP.toast(e.message, true);
+    await loadWorkstations();
+    return null;
+  }
+}
+
+$("ws-obbligo").addEventListener("change", (ev) => wsPost("postazioni/obbligo", { attivo: ev.target.checked }));
+
+$("ws-new").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const mode = ev.submitter && ev.submitter.value === "questa" ? "questa" : "codice";
+  const nome = ev.target.elements.nome.value;
+  const out = await wsPost(mode === "questa" ? "postazioni/questa" : "postazioni/codice", { nome });
+  if (!out) return;
+  ev.target.reset();
+  EMP.showVersion(true);
+  if (mode === "codice") {
+    const box = $("ws-codice");
+    const strong = document.createElement("p");
+    strong.className = "chiave";
+    strong.textContent = out.codice;
+    box.replaceChildren(
+      Object.assign(document.createElement("h4"), { textContent: "Codice per " + nome }),
+      strong,
+      Object.assign(document.createElement("p"), {
+        className: "note",
+        textContent: "Sulla nuova postazione: apri " + location.origin + "/admin/ → \"Associa questa postazione\" e scrivi il codice. "
+          + "Vale fino alle " + fmtDb(out.scade).slice(11) + ", una volta sola.",
+      }),
+      action("Chiudi", "secondario", () => { box.hidden = true; }),
+    );
+    box.hidden = false;
+  }
+});
+
+$("show-pair").addEventListener("click", (ev) => {
+  ev.preventDefault();
+  $("pair-form").hidden = false;
+  $("pair-form").elements.codice.focus();
+});
+$("pair-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    const out = await EMP.api("postazioni/associa", "POST", { codice: ev.target.elements.codice.value });
+    ev.target.reset();
+    ev.target.hidden = true;
+    EMP.toast(out.messaggio);
+    EMP.showVersion(true);
+  } catch (e) {
+    EMP.toast(e.message, true);
+  }
+});
 
 // ---- Profilo dell'utente collegato ------------------------------------------------------------
 

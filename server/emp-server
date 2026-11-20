@@ -232,7 +232,8 @@ cmd_stato() {
     last=$(find "$EMP_BACKUP" -maxdepth 1 -type f -name 'emp-backup-*.tar' -printf '%T@ %f\n' 2>/dev/null | sort -rn | sed -n '1s/^[^ ]* //p')
     echo "Ultimo backup: ${last:-nessuno}"
     warn_personal_emp_user
-    if [[ -f $REMOTE_CONF ]]; then echo "Copia remota: $(remote_description)$([[ -f $REMOTE_DIR/account ]] && echo " — account $(cat "$REMOTE_DIR/account")")"; else echo "Copia remota: non collegata (sudo emp-server backup-remoto collega gdrive)"; fi
+    # Account Google abbreviato: "stato" finisce anche nei log pubblici delle installazioni da GitHub.
+    if [[ -f $REMOTE_CONF ]]; then echo "Copia remota: $(remote_description)$([[ -f $REMOTE_DIR/account ]] && echo " — account $(sed -E 's/^(.{2})[^@]*@/\1…@/' "$REMOTE_DIR/account")")"; else echo "Copia remota: non collegata (sudo emp-server backup-remoto collega gdrive)"; fi
     echo "Indirizzi:"
     cmd_indirizzi
 }

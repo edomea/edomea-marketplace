@@ -9,10 +9,39 @@
 const $ = (id) => document.getElementById(id);
 const AREA = document.body.dataset.area;
 const AREA_DEL_RUOLO = (ruolo) => (ruolo === "tecnico" ? "techadmin" : "admin");
-const RUOLI = { amministratore: "Amministratore", operatore: "Operatore" };
+const RUOLI = { amministratore: "Amministratore Operativo", operatore: "Operatore" };
 let jobRoles = [];      // ruoli di negozio (Cassiere, Magazziniere…)
 let permCatalog = [];   // permessi dichiarati dai moduli avviati
 let current = null;
+
+/*
+ * Viste della pagina, scelte dall'indirizzo (#profilo, #utenti, #postazioni, #ruoli; vuoto = pagina iniziale):
+ * per il Tecnico la pagina iniziale è il Control Center, per l'Amministratore l'elenco degli operatori,
+ * per un operatore il suo profilo.
+ */
+function views() {
+  const home = AREA === "techadmin" ? ["cc-box"] : (current && current.ruolo === "operatore" ? ["profile-box"] : ["users-box"]);
+  const own = { "": home, profilo: ["profile-box"] };
+  if (current && current.ruolo !== "operatore") Object.assign(own, { utenti: ["users-box"], postazioni: ["ws-box"], ruoli: ["roles-box"] });
+  return own;
+}
+
+function route() {
+  const all = views();
+  let view = location.hash.slice(1);
+  if (!all[view]) view = "";
+  show(all[view]);
+  // Per l'Amministratore la pagina iniziale è "Operatori": voce del menu evidenziata.
+  EMP.setVoce(view === "" && AREA === "admin" && current.ruolo !== "operatore" ? "utenti" : view);
+  if (view === "" && AREA === "admin" && current.ruolo !== "operatore") $("emp-indietro").hidden = true;
+  if (view === "utenti" && AREA === "admin") $("emp-indietro").hidden = true;
+  if (all[view].includes("cc-box") && typeof window.caricaCentro === "function") window.caricaCentro();
+  window.scrollTo(0, 0);
+}
+
+window.addEventListener("hashchange", () => {
+  if (current && !current.cambio_password) route();
+});
 
 function show(ids) {
   for (const id of ["login-box", "password-box", "links-box", "cc-box", "profile-box", "ws-box", "users-box", "roles-box"]) {
@@ -39,6 +68,7 @@ async function load() {
     return;
   }
   EMP.showUser(current);
+  EMP.setMenuUser(current && !current.cambio_password ? current.ruolo : null);
   if (!current) {
     show(["login-box"]);
     return;
@@ -53,8 +83,7 @@ async function load() {
   if ($("link-backup")) $("link-backup").hidden = current.ruolo !== "tecnico";
   if ($("link-sistema")) $("link-sistema").hidden = current.ruolo !== "tecnico";
   if ($("link-marchio")) $("link-marchio").hidden = current.ruolo !== "tecnico";
-  show(["links-box", "cc-box", "profile-box"]);
-  if (typeof window.caricaCentro === "function" && $("cc-box")) window.caricaCentro();
+  route();
   await Promise.all([loadProfile(), loadUsers(), loadWorkstations()]);
 }
 
@@ -68,10 +97,11 @@ async function loadWorkstations() {
   try {
     data = await EMP.api("postazioni");
   } catch (e) {
-    // Senza HTTPS la gestione delle postazioni non è disponibile: il riquadro resta nascosto.
+    // Senza HTTPS la gestione delle postazioni non è disponibile.
+    $("ws-questa").textContent = "—";
+    $("ws-obbligo-stato").textContent = "Gestione delle postazioni disponibile solo con l'indirizzo https://.";
     return;
   }
-  $("ws-box").hidden = false;
   $("ws-obbligo-riga").hidden = !data.puo_cambiare_obbligo;
   $("ws-obbligo").checked = data.obbligatorie;
   $("ws-obbligo-stato").textContent = data.obbligatorie
@@ -268,7 +298,6 @@ async function loadUsers() {
   const managed = data.gestibili || (data.gestibile ? [data.gestibile] : []);
   if (!managed.length) return;
   await loadRoles();
-  $("users-box").hidden = false;
   $("users-title").textContent = managed.length > 1 ? "Amministratori e operatori" : "Operatori";
   $("new-title").textContent = managed.length > 1 ? "Nuovo utente" : "Nuovo operatore";
   $("new-livello-riga").hidden = managed.length < 2;
@@ -278,6 +307,19 @@ async function loadUsers() {
   const names = Object.fromEntries(jobRoles.map((r) => [r.codice, r.nome]));
   const body = $("users").querySelector("tbody");
   body.replaceChildren();
+  // Prima riga: chi è collegato (es. l'Amministratore Tecnico), senza azioni: si modifica dal profilo.
+  const me = data.utenti.find((x) => x.id === current.id);
+  if (me) {
+    const tr = document.createElement("tr");
+    tr.className = "riga-tu";
+    for (const t of [me.nome + " (" + me.username + ") — tu", me.ruolo_etichetta, me.ruolo === "tecnico" ? "funzioni tecniche" : "tutti i permessi", "Attivo"]) {
+      tr.appendChild(Object.assign(document.createElement("td"), { textContent: t }));
+    }
+    const td = document.createElement("td");
+    td.appendChild(Object.assign(document.createElement("a"), { href: "#profilo", textContent: "Il tuo profilo" }));
+    tr.appendChild(td);
+    body.appendChild(tr);
+  }
   for (const u of data.utenti.filter((x) => x.id !== current.id)) {
     const tr = document.createElement("tr");
     const who = document.createElement("td");
@@ -316,7 +358,6 @@ async function loadRoles() {
   }
   jobRoles = data.ruoli;
   permCatalog = data.permessi;
-  $("roles-box").hidden = false;
   const body = $("roles").querySelector("tbody");
   body.replaceChildren();
   for (const r of jobRoles) {

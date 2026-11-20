@@ -159,7 +159,6 @@
   }
 
   window.caricaCentro = async () => {
-    $("cc-box").hidden = false;
     await load();
     if (!refreshed) {
       refreshed = true;

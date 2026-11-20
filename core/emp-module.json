@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "emp-core",
   "name": "EMP Core",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "type": "core",
   "description": "Motore di Edomea Marketplace: API, moduli, autorizzazioni, tracciabilità.",
   "php": ">=8.2.0",

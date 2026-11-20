@@ -136,6 +136,10 @@ jobs:
           test "$(code "${J[@]}" -X POST "$B/api/v1/accesso/setup" -d "$BODY_CODE")" = 409
           # Accesso e pagina Plugin: installazione dal web del plugin dimostrativo.
           curl -fsS -c "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Chiave-Sicura-CI-2026"}' | grep -q '"ruolo":"tecnico"'
+          # Profilo del Tecnico: visibile, modificabile solo con la password.
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/accesso/profilo" | jq -e '.profilo.username == "tecnico" and .profilo.sessioni_aperte >= 1' >/dev/null
+          test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/profilo" -d '{"nome":"X","username":"tecnico","password":"sbagliata"}')" = 403
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/profilo" -d '{"nome":"Tecnico CI","username":"tecnico","password":"Chiave-Sicura-CI-2026"}' | jq -e '.utente.nome == "Tecnico CI"' >/dev/null
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | grep -q '"stato":"installabile"'
           test "$(code -b "$RUNNER_TEMP/jar" --cacert "$CA" -X POST "$B/api/v1/plugin/emp-esempio/installa")" = 403
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/plugin/emp-esempio/installa" | tee /dev/stderr | grep -q '"ok":true'

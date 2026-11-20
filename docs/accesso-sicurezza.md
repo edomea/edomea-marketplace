@@ -56,6 +56,14 @@ Un amministratore, sugli utenti che gestisce, può:
 - **disattivare** l'account: sessioni chiuse e nuovi accessi impossibili;
 - **riattivare** l'account.
 
+## 5.1 Profilo e modifica degli account
+
+- **Il tuo profilo** (in /techadmin e in /admin): nome e cognome, nome utente, ruolo, quando e da chi è stato creato e modificato l'account, ultimo cambio password, sessioni aperte, ultimi 5 accessi (data e indirizzo IP), tentativi falliti in sospeso.
+- **Modifica il profilo:** nome e cognome e nome utente, con la propria password attuale. Cambiando il nome utente si entra con quello nuovo dal prossimo accesso; le sessioni aperte restano valide.
+- **Chiudi le altre sessioni:** con la propria password, chiude tutte le sessioni tranne quella in uso (es. un PC lasciato aperto).
+- **Modifica di un account gestito:** il Tecnico modifica nome e cognome e nome utente degli Amministratori Operativi, l'Amministratore quelli dei suoi operatori. Nessuno modifica chi sta sopra di lui.
+- Ogni modifica va nel registro di tracciabilità con i valori prima e dopo.
+
 ## 6. Recovery Key dell'Amministratore Tecnico
 
 - Generata al primo setup: 25 caratteri casuali (125 bit), formato `EMP-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`.

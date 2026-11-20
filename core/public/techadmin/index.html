@@ -45,7 +45,43 @@
     <p id="link-plugin" hidden><a href="plugin.html">Plugin</a> — installazione e aggiornamento dei plugin (solo in HTTPS)</p>
     <p id="link-backup" hidden><a href="backup.html">Backup</a> — backup, copia cifrata remota (Google Drive, SFTP), download e ripristino (solo in HTTPS)</p>
     <p id="link-sistema" hidden><a href="sistema.html">Sistema</a> — verifica e installazione degli aggiornamenti di Ubuntu, riavvio del server (solo in HTTPS)</p>
-    <p><a href="#" id="show-password">Cambia la tua password</a></p>
+  </section>
+
+  <!-- Profilo dell'utente collegato -->
+  <section id="profile-box" class="box" hidden>
+    <h2>Il tuo profilo</h2>
+    <table class="dettagli" id="profile">
+      <tbody>
+        <tr><th>Nome e cognome</th><td id="pf-nome"></td></tr>
+        <tr><th>Nome utente</th><td id="pf-username"></td></tr>
+        <tr><th>Ruolo</th><td id="pf-ruolo"></td></tr>
+        <tr><th>Account creato</th><td id="pf-creato"></td></tr>
+        <tr><th>Ultima modifica</th><td id="pf-modificato"></td></tr>
+        <tr><th>Password cambiata</th><td id="pf-password"></td></tr>
+        <tr><th>Sessioni aperte</th><td id="pf-sessioni"></td></tr>
+        <tr><th>Ultimi accessi</th><td id="pf-accessi"></td></tr>
+        <tr><th>Tentativi falliti in sospeso</th><td id="pf-falliti"></td></tr>
+      </tbody>
+    </table>
+    <p class="riga-azioni">
+      <button type="button" id="pf-modifica" class="secondario">Modifica il profilo</button>
+      <button type="button" id="pf-chiudi" class="secondario">Chiudi le altre sessioni</button>
+      <a href="#" id="show-password">Cambia la tua password</a>
+    </p>
+    <form id="profile-form" novalidate hidden>
+      <h3>Modifica il profilo</h3>
+      <label>Nome e cognome <input name="nome" autocomplete="name" required></label>
+      <label>Nome utente <input name="username" autocomplete="username" required>
+        <span class="note">Se lo cambi, dal prossimo accesso entri con il nuovo nome utente.</span></label>
+      <label>La tua password attuale <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">Salva</button>
+      <button type="button" id="pf-annulla" class="secondario">Annulla</button>
+    </form>
+    <form id="sessions-form" class="riga" novalidate hidden>
+      <label>Per chiudere le altre sessioni, la tua password <input name="password" type="password" autocomplete="current-password" required></label>
+      <button type="submit" class="conferma">Chiudi le altre sessioni</button>
+      <button type="button" id="pf-chiudi-annulla" class="secondario">Annulla</button>
+    </form>
   </section>
 
   <!-- Utenti gestiti -->

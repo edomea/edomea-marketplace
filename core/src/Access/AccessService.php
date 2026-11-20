@@ -308,7 +308,66 @@ final class AccessService
         return $key;
     }
 
+    // ------------------------------------------------------------------ profilo
+
+    /**
+     * Profilo dell'utente collegato: dati dell'account, sessioni aperte, ultimi accessi.
+     *
+     * @return array<string, mixed>
+     */
+    public function profile(User $user): array
+    {
+        $row = $this->findById($user->id);
+        if ($row === null) {
+            throw new AccessException('Utente non trovato', 404);
+        }
+        $now = $this->now();
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM {$this->sessions} WHERE user_id = ? AND revoked_at IS NULL AND expires_at > ?");
+        $stmt->execute([$user->id, $now]);
+        $sessions = (int) $stmt->fetchColumn();
+        $stmt = $this->pdo->prepare("SELECT attempted_at, ip FROM {$this->attempts} WHERE username = ? AND kind = 'login' AND success = 1 ORDER BY attempted_at DESC LIMIT 5");
+        $stmt->execute([$user->username]);
+        $logins = array_map(static fn (array $r): array => ['quando' => (string) $r['attempted_at'], 'ip' => (string) $r['ip']], $stmt->fetchAll(\PDO::FETCH_ASSOC));
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM {$this->attempts} WHERE username = ? AND success = 0");
+        $stmt->execute([$user->username]);
+
+        return User::fromRow($row)->toArray() + [
+            'creato_il' => (string) $row['created_at'],
+            'creato_da' => (string) $row['created_by'],
+            'modificato_il' => (string) $row['updated_at'],
+            'modificato_da' => (string) $row['updated_by'],
+            'password_cambiata_il' => (string) $row['password_changed_at'],
+            'sessioni_aperte' => $sessions,
+            'ultimi_accessi' => $logins,
+            'tentativi_falliti' => (int) $stmt->fetchColumn(),
+        ];
+    }
+
+    /** Modifica del proprio profilo (nome e cognome, nome utente): serve la password attuale. */
+    public function updateOwnProfile(User $user, string $password, string $displayName, string $username, string $ip): User
+    {
+        $this->confirmPassword($user, $password, $ip, 'profilo');
+
+        return $this->updateIdentity($user, $user, $displayName, $username, 'modifica_profilo');
+    }
+
+    /** Chiude tutte le altre sessioni dell'utente (es. un PC dimenticato aperto). */
+    public function closeOtherSessions(User $user, string $password, ?string $keepToken, string $ip): int
+    {
+        $this->confirmPassword($user, $password, $ip, 'chiudi_sessioni');
+        $n = $this->revokeAllSessions($user->id, $keepToken);
+        $this->audit->record($user->username, self::MODULE, 'chiudi_altre_sessioni', 'utente', $user->id, 0, null, "{$n} sessioni chiuse");
+
+        return $n;
+    }
+
     // ------------------------------------------------------------------ gestione utenti
+
+    /** Modifica di un utente gestito (Tecnico → amministratori, amministratore → operatori). */
+    public function updateUser(User $actor, string $targetId, string $displayName, string $username): User
+    {
+        return $this->updateIdentity($actor, $this->managedTarget($actor, $targetId), $displayName, $username, 'modifica_utente');
+    }
 
     /** @return list<User> l'utente stesso e quelli che può gestire */
     public function listUsers(User $actor): array
@@ -376,6 +435,41 @@ final class AccessService
     }
 
     // ------------------------------------------------------------------ interni
+
+    private function updateIdentity(User $actor, User $target, string $displayName, string $username, string $action): User
+    {
+        $displayName = $this->checkDisplayName($displayName);
+        $username = $this->checkUsername($username);
+        if ($username !== $target->username) {
+            $other = $this->findByUsername($username);
+            if ($other !== null && (string) $other['id'] !== $target->id) {
+                throw new AccessException('Nome utente già in uso', 409);
+            }
+        }
+        if ($username === $target->username && $displayName === $target->displayName) {
+            return $target;
+        }
+        $this->pdo->beginTransaction();
+        try {
+            $this->pdo->prepare("UPDATE {$this->users} SET username = ?, display_name = ?, updated_at = ?, updated_by = ? WHERE id = ?")
+                ->execute([$username, $displayName, $this->now(), $actor->username, $target->id]);
+            if ($username !== $target->username) {
+                // Storico degli accessi e blocco dei tentativi seguono l'account.
+                $this->pdo->prepare("UPDATE {$this->attempts} SET username = ? WHERE username = ?")->execute([$username, $target->username]);
+            }
+            $this->pdo->commit();
+        } catch (\Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+        $before = json_encode(['username' => $target->username, 'nome' => $target->displayName], JSON_UNESCAPED_UNICODE) ?: null;
+        $after = json_encode(['username' => $username, 'nome' => $displayName], JSON_UNESCAPED_UNICODE) ?: null;
+        $this->audit->record($actor->username, self::MODULE, $action, 'utente', $target->id, 0, $before, $after);
+
+        return User::fromRow((array) $this->findById($target->id));
+    }
 
     private function managedTarget(User $actor, string $targetId): User
     {

@@ -51,7 +51,7 @@ final class Role
     {
         return match ($role) {
             self::TECNICO => 'Amministratore Tecnico',
-            self::AMMINISTRATORE => 'Amministratore',
+            self::AMMINISTRATORE => 'Amministratore Operativo',
             self::OPERATORE => 'Operatore',
             default => $role,
         };

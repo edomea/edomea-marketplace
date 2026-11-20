@@ -4,7 +4,101 @@
  * Helper standard Edomea: api(), esc(), toast(), fmtDateTime().
  */
 
+/*
+ * Struttura delle pagine di amministrazione: intestazione con il marchio (clic = pagina iniziale),
+ * menu a sinistra, contenuto a destra con il pulsante per tornare alla pagina iniziale.
+ * Le pagine la attivano con <body data-shell="techadmin|admin" data-voce="…">.
+ */
+const EMP_MENU = {
+  techadmin: {
+    home: "/techadmin/",
+    homeLabel: "Control Center",
+    voci: [
+      { id: "profilo", label: "Il tuo profilo", href: "/techadmin/#profilo" },
+      { id: "utenti", label: "Amministratori e operatori", href: "/techadmin/#utenti" },
+      { id: "postazioni", label: "Postazioni", href: "/techadmin/#postazioni" },
+      { id: "ruoli", label: "Ruoli e permessi", href: "/techadmin/#ruoli" },
+      { id: "backup", label: "Backup", href: "/techadmin/backup.html" },
+      { id: "sistema", label: "Sistema", href: "/techadmin/sistema.html" },
+      { id: "plugin", label: "Plugin", href: "/techadmin/plugin.html" },
+      { id: "marchio", label: "Marchio", href: "/techadmin/marchio.html" },
+    ],
+  },
+  admin: {
+    home: "/admin/",
+    homeLabel: "Operatori",
+    voci: [
+      { id: "profilo", label: "Il tuo profilo", href: "/admin/#profilo" },
+      { id: "utenti", label: "Operatori", href: "/admin/#utenti", ruoli: ["amministratore"] },
+      { id: "postazioni", label: "Postazioni", href: "/admin/#postazioni", ruoli: ["amministratore"] },
+      { id: "ruoli", label: "Ruoli e permessi", href: "/admin/#ruoli", ruoli: ["amministratore"] },
+    ],
+  },
+};
+
 const EMP = {
+  /** Costruisce intestazione cliccabile, menu laterale e pulsante "indietro" (una volta per pagina). */
+  buildShell() {
+    const area = document.body.dataset.shell;
+    const menu = EMP_MENU[area];
+    const main = document.querySelector("main");
+    if (!menu || !main || document.querySelector(".emp-layout")) return;
+    // Marchio e titolo nell'intestazione: portano alla pagina iniziale.
+    const title = document.querySelector(".emp-header strong");
+    if (title && !title.closest("a")) {
+      const a = document.createElement("a");
+      a.className = "emp-home";
+      a.href = menu.home;
+      a.title = menu.homeLabel;
+      title.replaceWith(a);
+      a.appendChild(title);
+    }
+    const layout = document.createElement("div");
+    layout.className = "emp-layout";
+    const nav = document.createElement("nav");
+    nav.className = "emp-menu";
+    nav.setAttribute("aria-label", "Menu");
+    const ul = document.createElement("ul");
+    for (const v of menu.voci) {
+      const li = document.createElement("li");
+      li.dataset.voce = v.id;
+      if (v.ruoli) li.dataset.ruoli = v.ruoli.join(" ");
+      const a = document.createElement("a");
+      a.href = v.href;
+      a.textContent = v.label;
+      li.appendChild(a);
+      ul.appendChild(li);
+    }
+    nav.appendChild(ul);
+    main.before(layout);
+    const content = document.createElement("div");
+    content.className = "emp-contenuto";
+    layout.append(nav, content);
+    content.appendChild(main);
+    const back = document.createElement("a");
+    back.id = "emp-indietro";
+    back.className = "emp-indietro";
+    back.href = menu.home;
+    back.textContent = "← " + menu.homeLabel;
+    main.prepend(back);
+    EMP.setVoce(document.body.dataset.voce || "");
+  },
+
+  /** Voce attiva del menu ("" = pagina iniziale: niente pulsante indietro). */
+  setVoce(voce) {
+    for (const li of document.querySelectorAll(".emp-menu li")) li.classList.toggle("attiva", li.dataset.voce === voce);
+    const back = document.getElementById("emp-indietro");
+    if (back) back.hidden = voce === "";
+  },
+
+  /** Mostra il menu (dopo l'accesso) con le sole voci del ruolo dell'utente; null = nasconde. */
+  setMenuUser(ruolo) {
+    document.body.classList.toggle("con-menu", !!ruolo);
+    for (const li of document.querySelectorAll(".emp-menu li[data-ruoli]")) {
+      li.hidden = !ruolo || !li.dataset.ruoli.split(" ").includes(ruolo);
+    }
+  },
+
   /** Versioni installate in fondo a ogni pagina (EMP Server e Core). */
   async showVersion(refresh = false) {
     let footer = document.querySelector("footer.emp-versione");
@@ -169,6 +263,9 @@ const EMP = {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
+  EMP.buildShell();
+  // Pagine del solo Tecnico (Backup, Sistema…): il menu è sempre visibile.
+  if (document.body.dataset.shell && !document.body.dataset.area) document.body.classList.add("con-menu");
   EMP.applyBrand();
   EMP.showVersion();
 });

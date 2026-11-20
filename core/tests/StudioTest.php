@@ -121,11 +121,11 @@ final class StudioTest extends TestCase
         // Scheda incompleta: EAN sbagliato rifiutato, SKU automatico, completezza parziale.
         self::assertSame(422, $this->call('POST', '/api/v1/studio/prodotti', ['nome' => 'Lavatrice', 'ean' => '8001234567891'])[0]);
         [$s, $r] = $this->call('POST', '/api/v1/studio/prodotti', ['nome' => 'Lavatrice WW90', 'ean' => '8001234567897', 'marca_id' => $brand,
-            'categoria_id' => $cat, 'famiglia_id' => self::LAVATRICI, 'classe_energetica' => 'A', 'eprel' => '1234567',
+            'categoria_id' => $cat, 'famiglia_id' => self::LAVATRICI,
             'valori' => ['00000000-0000-4000-8000-000000000006' => '9', '00000000-0000-4000-8000-000000000007' => 'tanti']]);
         self::assertSame(422, $s, 'numero non valido');
         [$s, $r] = $this->call('POST', '/api/v1/studio/prodotti', ['nome' => 'Lavatrice WW90', 'ean' => '8001234567897', 'marca_id' => $brand,
-            'categoria_id' => $cat, 'famiglia_id' => self::LAVATRICI, 'classe_energetica' => 'A', 'eprel' => '1234567',
+            'categoria_id' => $cat, 'famiglia_id' => self::LAVATRICI,
             'valori' => ['00000000-0000-4000-8000-000000000006' => '9,0', '00000000-0000-4000-8000-000000000007' => '1400']]);
         self::assertSame(200, $s, json_encode($r));
         $id = $r['id'];
@@ -150,9 +150,37 @@ final class StudioTest extends TestCase
         self::assertSame([], $p['mancanti'], json_encode($p['mancanti']));
         self::assertSame(100, $p['prodotto']['completezza']);
         self::assertCount(3, $p['media']);
+
         $photo = array_values(array_filter($p['media'], static fn ($x) => $x['tipo'] === 'foto'))[0];
         self::assertMatchesRegularExpression('#^/m-file/emp-studio/foto/[0-9a-f]{2}/[0-9a-f-]{36}\.png$#', $photo['url']);
         self::assertFileExists($this->data . '/emp-studio/pubblico/' . substr($photo['url'], strlen('/m-file/emp-studio/')));
+
+        // Caratteristica creata al momento ("Garanzia: 24 mesi"), poi disponibile per tutte le schede; toglierla dalla scheda la cancella.
+        $values = $p['valori'];
+        [$s, $r] = $this->call('POST', '/api/v1/studio/prodotti/' . $id, array_merge($p['prodotto'], ['valori' => $values, 'nuove' => [['nome' => 'Garanzia', 'valore' => '24 mesi'], ['nome' => 'Wi-Fi', 'valore' => 'sì']]]));
+        self::assertSame(200, $s, json_encode($r));
+        [, $p] = $this->call('GET', '/api/v1/studio/prodotti/' . $id);
+        $byName = array_column($p['attributi'], 'id', 'nome');
+        self::assertSame('24 mesi', $p['valori'][$byName['Garanzia']], 'la migrazione 0003 ha già "Garanzia": si riusa');
+        self::assertSame('00000000-0000-4000-8000-000000000017', $byName['Garanzia']);
+        self::assertSame('sì', $p['valori'][$byName['Wi-Fi']]);
+        [, $st] = $this->call('GET', '/api/v1/studio/struttura');
+        self::assertContains('Wi-Fi', array_column($st['attributi'], 'nome'));
+        self::assertSame(409, $this->call('POST', '/api/v1/studio/attributi/' . $byName['Wi-Fi'] . '/elimina')[0]);
+        unset($p['valori'][$byName['Wi-Fi']]);
+        $this->call('POST', '/api/v1/studio/prodotti/' . $id, array_merge($p['prodotto'], ['valori' => $p['valori']]));
+        [, $p] = $this->call('GET', '/api/v1/studio/prodotti/' . $id);
+        self::assertArrayNotHasKey($byName['Wi-Fi'], $p['valori']);
+        self::assertNotContains('Wi-Fi', array_column($p['attributi'], 'nome'));
+        self::assertArrayNotHasKey('garanzia_mesi', $p['prodotto']);
+
+        // Immagine principale: caricata con principale=1 passa davanti alle altre.
+        [$s, $m2] = $this->call('POST', '/api/v1/studio/media', $png, null, ['prodotto' => $id, 'titolo' => 'Retro', 'principale' => '1'], ['content-type' => 'image/png']);
+        self::assertSame(200, $s, json_encode($m2));
+        [, $p] = $this->call('GET', '/api/v1/studio/prodotti/' . $id);
+        $photos = array_values(array_filter($p['media'], static fn ($x) => $x['tipo'] === 'foto'));
+        self::assertSame(['Retro', 'Fronte'], array_column($photos, 'titolo'));
+        self::assertSame(200, $this->call('POST', '/api/v1/studio/media/' . $m2['id'] . '/elimina')[0]);
 
         // Ricerca: testo, EAN letto dal lettore, filtro per categoria superiore.
         self::assertSame(1, $this->call('GET', '/api/v1/studio/prodotti', null, null, ['q' => 'samsung ww90'])[1]['totale']);
@@ -209,6 +237,31 @@ final class StudioTest extends TestCase
         [, $st] = $this->call('GET', '/api/v1/studio/struttura');
         $monitor = array_values(array_filter($st['famiglie'], static fn ($x) => $x['id'] === $f['id']))[0];
         self::assertSame([['id' => $attr, 'obbligatorio' => true]], $monitor['attributi']);
+    }
+
+    public function testTables(): void
+    {
+        [, $st] = $this->call('GET', '/api/v1/studio/struttura');
+        self::assertSame(['22', '10', '5', '4', '0'], array_column($st['tabelle']['iva']['voci'], 'codice'));
+        self::assertSame('pz', $st['tabelle']['um']['voci'][0]['codice']);
+        self::assertSame(422, $this->call('POST', '/api/v1/studio/tabelle/iva', ['codice' => 'N4', 'descrizione' => 'Esente art. 10', 'valore' => 'x'])[0]);
+        self::assertSame(200, $this->call('POST', '/api/v1/studio/tabelle/iva', ['codice' => 'N4', 'descrizione' => 'Esente art. 10', 'valore' => '0'])[0]);
+        self::assertSame(409, $this->call('POST', '/api/v1/studio/tabelle/iva', ['codice' => 'N4', 'descrizione' => 'Doppione', 'valore' => '0'])[0]);
+        self::assertSame(200, $this->call('POST', '/api/v1/studio/tabelle/um', ['codice' => 'kit', 'descrizione' => 'Kit', 'valore' => ''])[0]);
+        self::assertSame(404, $this->call('POST', '/api/v1/studio/tabelle/colori', ['codice' => 'x', 'descrizione' => 'x', 'valore' => ''])[0]);
+        // Il prodotto usa N4 e kit; un valore che non è in tabella è rifiutato; senza valore: la prima voce.
+        self::assertSame(422, $this->call('POST', '/api/v1/studio/prodotti', ['nome' => 'X', 'iva' => '99'])[0]);
+        $id = $this->call('POST', '/api/v1/studio/prodotti', ['nome' => 'Kit di pulizia', 'iva' => 'N4', 'um' => 'kit'])[1]['id'];
+        self::assertSame(['N4', 'kit'], [$this->call('GET', '/api/v1/studio/prodotti/' . $id)[1]['prodotto']['iva'], $this->call('GET', '/api/v1/studio/prodotti/' . $id)[1]['prodotto']['um']]);
+        $other = $this->call('POST', '/api/v1/studio/prodotti', ['nome' => 'Altro'])[1]['id'];
+        self::assertSame('22', $this->call('GET', '/api/v1/studio/prodotti/' . $other)[1]['prodotto']['iva']);
+        // Voce usata: non si elimina e il codice non cambia; la descrizione sì.
+        self::assertSame(409, $this->call('POST', '/api/v1/studio/tabelle/iva/N4/elimina')[0]);
+        self::assertSame(409, $this->call('POST', '/api/v1/studio/tabelle/iva/N4', ['codice' => 'N4X', 'descrizione' => 'Esente', 'valore' => '0'])[0]);
+        self::assertSame(200, $this->call('POST', '/api/v1/studio/tabelle/iva/N4', ['codice' => 'N4', 'descrizione' => 'Esente art. 10 DPR 633/72', 'valore' => '0'])[0]);
+        self::assertSame(200, $this->call('POST', '/api/v1/studio/tabelle/iva/4/elimina')[0]);
+        [, $st] = $this->call('GET', '/api/v1/studio/struttura');
+        self::assertSame(['22', '10', '5', '0', 'N4'], array_column($st['tabelle']['iva']['voci'], 'codice'));
     }
 
     public function testPermissions(): void

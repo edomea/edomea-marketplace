@@ -19,6 +19,7 @@
     }
     $("nuovo").hidden = !S.permessi.modifica;
     $("tab-struttura").hidden = !S.permessi.configura;
+    $("tab-tabelle").hidden = !S.permessi.configura;
     riempiSelect();
     collega();
     window.addEventListener("hashchange", instrada);
@@ -27,7 +28,7 @@
 
   // ------------------------------------------------------------------ navigazione
   function mostra(vista) {
-    for (const v of ["prodotti", "scheda", "struttura"]) $("vista-" + v).hidden = v !== vista;
+    for (const v of ["prodotti", "scheda", "struttura", "tabelle"]) $("vista-" + v).hidden = v !== vista;
     for (const a of document.querySelectorAll("#schede-vista a")) {
       a.classList.toggle("attiva", a.dataset.vista === (vista === "scheda" ? "prodotti" : vista));
     }
@@ -39,6 +40,7 @@
     if (h.startsWith("prodotto/")) return apriScheda(h.slice(9));
     if (h === "nuovo" && S.permessi.modifica) return apriScheda(null);
     if (h === "struttura" && S.permessi.configura) { mostra("struttura"); return disegnaStruttura(); }
+    if (h === "tabelle" && S.permessi.configura) { mostra("tabelle"); return disegnaTabelle(); }
     mostra("prodotti");
     caricaElenco();
   }
@@ -62,9 +64,9 @@
     opzioni(s.marca_id, marche, "—");
     opzioni(s.categoria_id, cat, "—");
     opzioni(s.famiglia_id, st.famiglie.map((x) => [x.id, x.nome]), "—");
-    opzioni(s.iva, st.iva.map((v) => [v, v + "%"]));
-    opzioni(s.um, st.unita.map((v) => [v, v]));
-    opzioni(s.classe_energetica, st.classi_energetiche.map((v) => [v, v]), "—");
+    opzioni(s.iva, st.tabelle.iva.voci.map((v) => [v.codice, (v.codice === v.valore ? v.valore + "%" : v.codice + " (" + v.valore + "%)") + " — " + v.descrizione]));
+    opzioni(s.um, st.tabelle.um.voci.map((v) => [v.codice, v.codice + " — " + v.descrizione]));
+    $("elenco-caratteristiche").innerHTML = st.attributi.map((a) => '<option value="' + esc(a.nome) + '">').join("");
     opzioni($("nuova-categoria").parent_id, cat, "(principale)");
   }
 
@@ -126,11 +128,12 @@
       }
     }
     S.scheda = d;
-    const p = d ? d.prodotto : { tipo: "semplice", stato: "bozza", iva: "22", um: "pz" };
+    const prima = (t) => (S.struttura.tabelle[t].voci[0] || {}).codice || "";
+    const p = d ? d.prodotto : { tipo: "semplice", stato: "bozza", iva: prima("iva"), um: prima("um") };
     const f = $("scheda");
     f.reset();
-    for (const k of ["tipo", "sku", "ean", "mpn", "nome", "marca_id", "categoria_id", "famiglia_id", "stato", "iva", "um", "garanzia_mesi",
-      "classe_energetica", "eprel", "descrizione_breve", "descrizione"]) {
+    for (const k of ["tipo", "sku", "ean", "mpn", "nome", "marca_id", "categoria_id", "famiglia_id", "stato", "iva", "um",
+      "descrizione_breve", "descrizione"]) {
       if (f[k]) f[k].value = p[k] == null ? "" : p[k];
     }
     f.tipo.disabled = !!d;
@@ -147,24 +150,22 @@
       $("completezza-testo").textContent = "Completezza " + p.completezza + "%" + (d.mancanti.length ? " — manca: " + d.mancanti.join(", ") : " — scheda completa")
         + (d.modello ? " · variante di «" + d.modello.nome + "»" : "");
     }
-    aggiornaEprel();
-    disegnaAttributi(f.famiglia_id.value, d ? d.valori : {});
+    S.righe = d ? d.attributi.map((a) => ({ ...a, valore: d.valori[a.id] || "" })) : [];
+    allineaFamiglia();
+    disegnaAttributi();
     const sola = !S.permessi.modifica;
+    $("aggiungi-caratteristica").hidden = sola;
     for (const el of f.elements) if (el.name) el.disabled = sola || (el.name === "tipo" && !!d);
     $("genera-ean").hidden = sola;
     $("azioni-scheda").hidden = sola;
     $("box-media").hidden = !d;
     $("carica-media").hidden = sola;
+    $("zona-foto").hidden = !d;
+    $("carica-foto").hidden = !d || sola;
+    $("foto-dopo").hidden = !!d || sola;
     if (d) disegnaMedia(d.media);
     $("box-varianti").hidden = !d || p.tipo !== "modello";
     if (d && p.tipo === "modello") disegnaVarianti(d);
-  }
-
-  function aggiornaEprel() {
-    const v = $("scheda").eprel.value.trim();
-    const a = $("link-eprel");
-    a.hidden = !/^\d{3,12}$/.test(v);
-    a.href = "https://eprel.ec.europa.eu/qr/" + encodeURIComponent(v);
   }
 
   function famiglia(id) {
@@ -189,28 +190,76 @@
     return "<label>" + lab + " " + input + "</label>";
   }
 
-  function disegnaAttributi(famId, valori) {
-    const fam = famiglia(famId);
-    $("box-attributi").hidden = !fam || !fam.attributi.length;
-    if (!fam) { $("attributi").innerHTML = ""; return; }
-    $("famiglia-nome").textContent = "— " + fam.nome + " (* = obbligatoria)";
-    $("attributi").innerHTML = fam.attributi.map((x) => {
-      const a = attributo(x.id);
-      return a ? campoAttributo(a, valori[a.id], x.obbligatorio) : "";
-    }).join("");
-    for (const sel of $("attributi").querySelectorAll("select")) sel.value = valori[sel.name.slice(5)] || "";
-    if (!S.permessi.modifica) for (const el of $("attributi").querySelectorAll("input,select")) el.disabled = true;
+  /* Caratteristiche della scheda: S.righe = [{id (null se nuova), nome, tipo, unita, opzioni, obbligatorio, famiglia, valore}]. */
+  function leggiRighe() {
+    for (const el of $("attributi").querySelectorAll("[data-riga]")) S.righe[Number(el.dataset.riga)].valore = el.value;
+  }
+
+  /** La famiglia è un modello di scheda: aggiunge le sue caratteristiche; quelle della famiglia precedente, se vuote, spariscono. */
+  function allineaFamiglia() {
+    const fam = famiglia($("scheda").famiglia_id.value);
+    const della = new Map((fam ? fam.attributi : []).map((x) => [x.id, x.obbligatorio]));
+    S.righe = S.righe.filter((r) => !r.famiglia || della.has(r.id) || r.valore !== "");
+    for (const r of S.righe) {
+      r.famiglia = della.has(r.id);
+      r.obbligatorio = !!della.get(r.id);
+    }
+    for (const [id, obbl] of della) {
+      const a = attributo(id);
+      if (a && !S.righe.some((r) => r.id === id)) S.righe.push({ ...a, obbligatorio: obbl, famiglia: true, valore: "" });
+    }
+    $("famiglia-nome").textContent = fam ? "— modello «" + fam.nome + "» (* = obbligatoria)" : "";
+  }
+
+  function disegnaAttributi() {
+    const sola = !S.permessi.modifica;
+    $("attributi").innerHTML = S.righe.length ? S.righe.map((r, i) => {
+      let input;
+      const attr = ' data-riga="' + i + '"' + (sola ? " disabled" : "");
+      if (r.tipo === "si_no") {
+        input = "<select" + attr + '><option value="">—</option><option value="si">Sì</option><option value="no">No</option></select>';
+      } else if (r.tipo === "elenco") {
+        input = "<select" + attr + '><option value="">—</option>' + r.opzioni.map((o) => '<option value="' + esc(o) + '">' + esc(o) + "</option>").join("") + "</select>";
+      } else {
+        input = "<input" + attr + (r.tipo === "numero" ? ' inputmode="decimal"' : "") + ' maxlength="500" value="' + esc(r.valore) + '">';
+      }
+      return '<div class="riga-car"><span class="nome-car">' + esc(r.nome) + (r.unita ? " <small>(" + esc(r.unita) + ")</small>" : "") + (r.obbligatorio ? " *" : "")
+        + (r.id ? "" : ' <small class="nuova">nuova</small>') + "</span>" + input
+        + (sola || r.famiglia ? '<span class="spazio-togli"></span>' : '<button type="button" class="secondario piccolo" data-togli="' + i + '" title="Togli dalla scheda">✕</button>')
+        + "</div>";
+    }).join("") : '<p class="note">Nessuna caratteristica: aggiungi solo quelle che servono a questo prodotto.</p>';
+    for (const el of $("attributi").querySelectorAll("select[data-riga]")) el.value = S.righe[Number(el.dataset.riga)].valore;
+  }
+
+  function aggiungiCaratteristica() {
+    const nome = $("nuova-car-nome").value.trim();
+    const valore = $("nuova-car-valore").value.trim();
+    if (!nome) { $("nuova-car-nome").focus(); return; }
+    leggiRighe();
+    const a = S.struttura.attributi.find((x) => x.nome.toLowerCase() === nome.toLowerCase());
+    const gia = S.righe.findIndex((r) => (a && r.id === a.id) || (!r.id && r.nome.toLowerCase() === nome.toLowerCase()));
+    if (gia >= 0) {
+      if (valore) S.righe[gia].valore = valore;
+    } else {
+      S.righe.push(a ? { ...a, obbligatorio: false, famiglia: false, valore } : { id: null, nome, tipo: "testo", unita: "", opzioni: [], obbligatorio: false, famiglia: false, valore });
+    }
+    disegnaAttributi();
+    $("nuova-car-nome").value = "";
+    $("nuova-car-valore").value = "";
+    $("nuova-car-nome").focus();
   }
 
   function datiScheda() {
     const f = $("scheda");
-    const out = { valori: {} };
+    const out = { valori: {}, nuove: [] };
     for (const el of f.elements) {
-      if (!el.name) continue;
-      if (el.name.startsWith("attr:")) out.valori[el.name.slice(5)] = el.value;
-      else out[el.name] = el.value;
+      if (el.name && !el.name.startsWith("attr:")) out[el.name] = el.value;
     }
-    if (out.garanzia_mesi === "") out.garanzia_mesi = null;
+    leggiRighe();
+    for (const r of S.righe) {
+      if (r.id) out.valori[r.id] = r.valore;
+      else if (r.valore !== "") out.nuove.push({ nome: r.nome, valore: r.valore });
+    }
     return out;
   }
 
@@ -232,39 +281,58 @@
   }
 
   function disegnaMedia(media) {
-    const icone = { documento: "📄", video: "▶" };
-    let primaFoto = true;
-    $("galleria").innerHTML = media.length ? media.map((m) => {
-      const principale = m.tipo === "foto" && primaFoto;
-      if (m.tipo === "foto") primaFoto = false;
-      const anteprima = m.tipo === "foto" ? '<img src="' + esc(m.url) + '" alt="" loading="lazy">' : '<div class="icona">' + icone[m.tipo] + "</div>";
-      const azioni = S.permessi.modifica
-        ? '<p class="riga-azioni">' + (m.tipo === "foto" && !principale ? '<button type="button" class="secondario piccolo" data-principale="' + esc(m.id) + '">Principale</button>' : "")
-          + '<button type="button" class="pericolo piccolo" data-elimina-media="' + esc(m.id) + '">Elimina</button></p>'
-        : "";
-      return '<figure class="' + (principale ? "principale" : "") + '">' + anteprima
-        + '<figcaption><a href="' + esc(m.url) + '" target="_blank" rel="noopener noreferrer">' + esc(m.titolo || (principale ? "Foto principale" : m.tipo)) + "</a></figcaption>"
-        + azioni + "</figure>";
-    }).join("") : '<p class="note">Nessuna foto o documento.</p>';
+    const sola = !S.permessi.modifica;
+    const foto = media.filter((m) => m.tipo === "foto");
+    const [principale, ...galleria] = foto;
+    $("foto-principale").innerHTML = principale
+      ? '<a href="' + esc(principale.url) + '" target="_blank" rel="noopener noreferrer"><img src="' + esc(principale.url) + '" alt="Immagine principale"></a>'
+        + '<p class="riga-azioni"><span class="note">Immagine principale</span>'
+        + (sola ? "" : '<button type="button" class="pericolo piccolo" data-elimina-media="' + esc(principale.id) + '">Elimina</button>') + "</p>"
+      : '<div class="vuota">Nessuna immagine principale</div>';
+    $("galleria-conta").textContent = galleria.length ? "(" + galleria.length + ")" : "";
+    $("galleria").innerHTML = galleria.length ? galleria.map((m) => '<figure><a href="' + esc(m.url) + '" target="_blank" rel="noopener noreferrer"><img src="' + esc(m.url) + '" alt="" loading="lazy"></a>'
+      + (sola ? "" : '<p class="riga-azioni"><button type="button" class="secondario piccolo" data-principale="' + esc(m.id) + '" title="Diventa l\'immagine principale">★ Principale</button>'
+        + '<button type="button" class="pericolo piccolo" data-elimina-media="' + esc(m.id) + '" title="Elimina">✕</button></p>') + "</figure>").join("")
+      : '<p class="note">Nessuna foto aggiuntiva.</p>';
+    const altri = media.filter((m) => m.tipo !== "foto");
+    $("documenti").innerHTML = altri.length ? altri.map((m) => "<li><span>" + (m.tipo === "video" ? "▶ " : "📄 ")
+      + '<a href="' + esc(m.url) + '" target="_blank" rel="noopener noreferrer">' + esc(m.titolo || (m.tipo === "video" ? "Video" : "Documento")) + "</a></span>"
+      + (sola ? "" : '<button type="button" class="pericolo piccolo" data-elimina-media="' + esc(m.id) + '">Elimina</button>') + "</li>").join("")
+      : '<li class="note">Nessun video o documento.</li>';
   }
 
-  async function caricaFile(files) {
+  async function caricaFile(files, principale) {
     const id = S.scheda.prodotto.id;
+    leggiRighe();
     for (const file of files) {
       try {
-        const res = await fetch("/api/v1/studio/media?prodotto=" + encodeURIComponent(id) + "&titolo=" + encodeURIComponent(file.name.replace(/\.[^.]+$/, "")), {
+        const res = await fetch("/api/v1/studio/media?prodotto=" + encodeURIComponent(id) + "&titolo=" + encodeURIComponent(file.name.replace(/\.[^.]+$/, ""))
+          + (principale ? "&principale=1" : ""), {
           method: "POST", credentials: "same-origin", body: file,
           headers: { "X-EMP-Richiesta": "1", "Content-Type": file.type || "application/octet-stream", Accept: "application/json" },
         });
         const data = await res.json().catch(() => null);
         if (!res.ok) throw new Error((data && data.errore) || "Errore " + res.status);
-        EMP.toast(file.name + ": caricato.");
+        EMP.toast(file.name + ": " + (data.messaggio || "caricato."));
       } catch (e) {
         EMP.toast(file.name + ": " + e.message, true);
       }
     }
-    $("file").value = "";
-    apriScheda(id);
+    for (const i of ["file", "file-principale", "file-galleria"]) $(i).value = "";
+    aggiornaMedia();
+  }
+
+  /** Ricarica solo foto e documenti, senza perdere le modifiche non salvate della scheda. */
+  async function aggiornaMedia() {
+    try {
+      const d = await EMP.api("studio/prodotti/" + encodeURIComponent(S.scheda.prodotto.id));
+      S.scheda.media = d.media;
+      disegnaMedia(d.media);
+      $("completezza-barra").style.width = d.prodotto.completezza + "%";
+      $("completezza-testo").textContent = "Completezza " + d.prodotto.completezza + "%" + (d.mancanti.length ? " — manca: " + d.mancanti.join(", ") : " — scheda completa");
+    } catch (e) {
+      EMP.toast(e.message, true);
+    }
   }
 
   function disegnaVarianti(d) {
@@ -323,8 +391,8 @@
       + (f.prodotti ? "" : '<button type="button" class="pericolo piccolo" data-elimina="famiglie" data-id="' + esc(f.id) + '" data-nome="' + esc(f.nome) + '">Elimina</button>')
       + "</td></tr>").join("");
     $("attributi-elenco").innerHTML = st.attributi.map((a) => "<tr><td>" + esc(a.nome) + (a.tipo === "elenco" ? "<small>" + esc(a.opzioni.join(", ")) + "</small>" : "")
-      + "</td><td>" + TIPI_ATTR[a.tipo] + "</td><td>" + esc(a.unita || "") + '</td><td class="riga-azioni"><button type="button" class="secondario piccolo" data-attributo="' + esc(a.id) + '">Modifica</button>'
-      + '<button type="button" class="pericolo piccolo" data-elimina="attributi" data-id="' + esc(a.id) + '" data-nome="' + esc(a.nome) + '">Elimina</button></td></tr>').join("");
+      + "</td><td>" + TIPI_ATTR[a.tipo] + "</td><td>" + esc(a.unita || "") + "</td><td>" + a.prodotti + '</td><td class="riga-azioni"><button type="button" class="secondario piccolo" data-attributo="' + esc(a.id) + '">Modifica</button>'
+      + (a.prodotti ? "" : '<button type="button" class="pericolo piccolo" data-elimina="attributi" data-id="' + esc(a.id) + '" data-nome="' + esc(a.nome) + '">Elimina</button>') + "</td></tr>").join("");
     applicaStili();
   }
 
@@ -385,8 +453,72 @@
     }
   }
 
+  // ------------------------------------------------------------------ tabelle di base (IVA, unità di misura…)
+  function disegnaTabelle() {
+    const t = S.struttura.tabelle;
+    $("tabelle").innerHTML = Object.keys(t).map((k) => {
+      const tab = t[k];
+      return '<section class="box"><h3>' + esc(tab.nome) + '</h3><table class="elenco-prodotti"><thead><tr><th>Codice</th><th>Descrizione</th>'
+        + (tab.valore ? "<th>" + esc(tab.valore) + "</th>" : "") + "<th>Prodotti</th><th></th></tr></thead><tbody>"
+        + tab.voci.map((v) => "<tr><td><strong>" + esc(v.codice) + "</strong></td><td>" + esc(v.descrizione) + "</td>" + (tab.valore ? "<td>" + esc(v.valore) + "</td>" : "")
+          + "<td>" + v.prodotti + '</td><td class="riga-azioni"><button type="button" class="secondario piccolo" data-voce-modifica="' + esc(k) + '" data-codice="' + esc(v.codice) + '">Modifica</button>'
+          + (v.prodotti ? "" : '<button type="button" class="pericolo piccolo" data-voce-elimina="' + esc(k) + '" data-codice="' + esc(v.codice) + '">Elimina</button>') + "</td></tr>").join("")
+        + '</tbody></table><form class="riga form-voce" data-tabella="' + esc(k) + '" novalidate><h4>Nuova voce</h4>'
+        + '<input name="codice" placeholder="Codice' + (k === "iva" ? " (es. 22, N4)" : " (es. pz)") + '" maxlength="16" autocomplete="off">'
+        + '<input name="descrizione" placeholder="Descrizione" maxlength="120">'
+        + (tab.valore ? '<input name="valore" inputmode="decimal" placeholder="' + esc(tab.valore) + '">' : "")
+        + '<button type="submit" class="secondario">Salva</button><button type="button" class="secondario" data-voce-annulla hidden>Annulla</button></form></section>';
+    }).join("");
+  }
+
+  function collegaTabelle() {
+    const box = $("tabelle");
+    box.addEventListener("click", async (e) => {
+      const m = e.target.closest("[data-voce-modifica]");
+      const d = e.target.closest("[data-voce-elimina]");
+      const a = e.target.closest("[data-voce-annulla]");
+      if (m) {
+        const v = S.struttura.tabelle[m.dataset.voceModifica].voci.find((x) => x.codice === m.dataset.codice);
+        const f = box.querySelector('form[data-tabella="' + m.dataset.voceModifica + '"]');
+        f.dataset.vecchio = v.codice;
+        f.querySelector("h4").textContent = "Modifica «" + v.codice + "»";
+        f.codice.value = v.codice;
+        f.descrizione.value = v.descrizione;
+        if (f.valore) f.valore.value = v.valore;
+        f.querySelector("[data-voce-annulla]").hidden = false;
+        f.descrizione.focus();
+      } else if (a) {
+        disegnaTabelle();
+      } else if (d) {
+        if (!confirm("Eliminare la voce «" + d.dataset.codice + "»?")) return;
+        try {
+          await EMP.api("studio/tabelle/" + d.dataset.voceElimina + "/" + encodeURIComponent(d.dataset.codice) + "/elimina", "POST");
+          await ricaricaStruttura();
+          disegnaTabelle();
+        } catch (err) {
+          EMP.toast(err.message, true);
+        }
+      }
+    });
+    box.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = e.target;
+      const old = f.dataset.vecchio;
+      try {
+        const r = await EMP.api("studio/tabelle/" + f.dataset.tabella + (old ? "/" + encodeURIComponent(old) : ""), "POST",
+          { codice: f.codice.value, descrizione: f.descrizione.value, valore: f.valore ? f.valore.value : "" });
+        EMP.toast(r.messaggio);
+        await ricaricaStruttura();
+        disegnaTabelle();
+      } catch (err) {
+        EMP.toast(err.message, true);
+      }
+    });
+  }
+
   // ------------------------------------------------------------------ eventi
   function collega() {
+    collegaTabelle();
     const f = $("filtri");
     f.addEventListener("submit", (e) => e.preventDefault());
     f.q.addEventListener("keydown", async (e) => {
@@ -416,9 +548,31 @@
 
     const s = $("scheda");
     s.addEventListener("submit", salvaScheda);
-    s.famiglia_id.addEventListener("change", () => disegnaAttributi(s.famiglia_id.value, S.scheda ? S.scheda.valori : {}));
+    s.famiglia_id.addEventListener("change", () => { leggiRighe(); allineaFamiglia(); disegnaAttributi(); });
+    $("nuova-car").addEventListener("click", aggiungiCaratteristica);
+    for (const id of ["nuova-car-nome", "nuova-car-valore"]) {
+      $(id).addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); aggiungiCaratteristica(); } });
+    }
+    $("attributi").addEventListener("click", (e) => {
+      const b = e.target.closest("[data-togli]");
+      if (!b) return;
+      leggiRighe();
+      S.righe.splice(Number(b.dataset.togli), 1);
+      disegnaAttributi();
+    });
+    $("file-principale").addEventListener("change", (e) => { if (e.target.files.length) caricaFile([e.target.files[0]], true); });
+    $("file-galleria").addEventListener("change", (e) => { if (e.target.files.length) caricaFile([...e.target.files], false); });
+    const zona = $("box-foto");
+    zona.addEventListener("dragover", (e) => { if (S.scheda && S.permessi.modifica) { e.preventDefault(); zona.classList.add("trascina"); } });
+    zona.addEventListener("dragleave", () => zona.classList.remove("trascina"));
+    zona.addEventListener("drop", (e) => {
+      zona.classList.remove("trascina");
+      if (!S.scheda || !S.permessi.modifica) return;
+      e.preventDefault();
+      const files = [...e.dataTransfer.files].filter((f) => /^image\//.test(f.type));
+      if (files.length) caricaFile(files, false);
+    });
     s.tipo.addEventListener("change", () => { for (const el of s.querySelectorAll(".solo-codici")) el.hidden = s.tipo.value === "modello"; });
-    s.eprel.addEventListener("input", aggiornaEprel);
     $("genera-ean").addEventListener("click", async () => {
       if (s.ean.value.trim() && !confirm("Sostituire l'EAN scritto con un nuovo EAN interno?")) return;
       try {
@@ -428,19 +582,19 @@
         EMP.toast(e.message, true);
       }
     });
-    $("file").addEventListener("change", (e) => { if (e.target.files.length) caricaFile([...e.target.files]); });
+    $("file").addEventListener("change", (e) => { if (e.target.files.length) caricaFile([...e.target.files], false); });
     $("video").addEventListener("submit", async (e) => {
       e.preventDefault();
       try {
         const r = await EMP.api("studio/video", "POST", { prodotto: S.scheda.prodotto.id, url: e.target.url.value, titolo: e.target.titolo.value });
         EMP.toast(r.messaggio);
         e.target.reset();
-        apriScheda(S.scheda.prodotto.id);
+        aggiornaMedia();
       } catch (err) {
         EMP.toast(err.message, true);
       }
     });
-    $("galleria").addEventListener("click", async (e) => {
+    $("vista-scheda").addEventListener("click", async (e) => {
       const p = e.target.closest("[data-principale]");
       const d = e.target.closest("[data-elimina-media]");
       if (!p && !d) return;
@@ -448,7 +602,7 @@
       try {
         const r = await EMP.api("studio/media/" + (p ? p.dataset.principale + "/principale" : d.dataset.eliminaMedia + "/elimina"), "POST");
         EMP.toast(r.messaggio);
-        apriScheda(S.scheda.prodotto.id);
+        aggiornaMedia();
       } catch (err) {
         EMP.toast(err.message, true);
       }

@@ -19,6 +19,7 @@
   <nav class="schede-vista" id="schede-vista">
     <a href="#prodotti" data-vista="prodotti">Prodotti</a>
     <a href="#struttura" data-vista="struttura" id="tab-struttura" hidden>Categorie, marche e famiglie</a>
+    <a href="#tabelle" data-vista="tabelle" id="tab-tabelle" hidden>Tabelle (IVA, unità di misura)</a>
   </nav>
 
   <!-- Elenco prodotti -->
@@ -53,6 +54,23 @@
       <p id="completezza-testo" class="note"></p>
     </div>
 
+    <section class="box" id="box-foto">
+      <h3>Foto del prodotto</h3>
+      <div class="foto-prodotto" id="zona-foto">
+        <div class="foto-principale" id="foto-principale"></div>
+        <div class="foto-galleria">
+          <h4>Galleria <span class="note" id="galleria-conta"></span></h4>
+          <div class="galleria" id="galleria"></div>
+        </div>
+      </div>
+      <p class="riga-azioni" id="carica-foto">
+        <label class="pulsante-file">Carica immagine principale <input type="file" id="file-principale" accept="image/jpeg,image/png,image/webp" hidden></label>
+        <label class="pulsante-file secondario">Aggiungi foto alla galleria <input type="file" id="file-galleria" accept="image/jpeg,image/png,image/webp" multiple hidden></label>
+        <span class="note">JPEG, PNG o WebP fino a 8 MB; si possono anche trascinare qui.</span>
+      </p>
+      <p class="note" id="foto-dopo" hidden>Salva la scheda per aggiungere le foto.</p>
+    </section>
+
     <form id="scheda" novalidate>
       <section class="box">
         <h3>Codici</h3>
@@ -77,15 +95,11 @@
           <label class="largo">Nome <input name="nome" maxlength="200" required></label>
           <label>Marca <select name="marca_id"><option value="">—</option></select></label>
           <label>Categoria <select name="categoria_id"><option value="">—</option></select></label>
-          <label>Famiglia <select name="famiglia_id"><option value="">—</option></select></label>
+          <label>Famiglia <span class="note">(facoltativa)</span> <select name="famiglia_id"><option value="">—</option></select></label>
           <label>Stato
             <select name="stato"><option value="bozza">Bozza</option><option value="attivo">Attivo</option><option value="archiviato">Archiviato</option></select></label>
           <label>IVA <select name="iva"></select></label>
           <label>Unità di misura <select name="um"></select></label>
-          <label>Garanzia (mesi) <input name="garanzia_mesi" type="number" min="0" max="120" placeholder="es. 24"></label>
-          <label>Classe energetica <select name="classe_energetica"><option value="">—</option></select></label>
-          <label>N. registrazione EPREL <input name="eprel" inputmode="numeric" autocomplete="off" placeholder="etichetta energetica UE">
-            <a id="link-eprel" href="#" target="_blank" rel="noopener noreferrer" hidden>apri la scheda EPREL</a></label>
         </div>
       </section>
 
@@ -95,9 +109,16 @@
         <label>Descrizione <textarea name="descrizione" rows="8" maxlength="20000"></textarea></label>
       </section>
 
-      <section class="box" id="box-attributi" hidden>
+      <section class="box" id="box-attributi">
         <h3>Caratteristiche <span class="note" id="famiglia-nome"></span></h3>
-        <div class="griglia-campi" id="attributi"></div>
+        <div class="caratteristiche" id="attributi"></div>
+        <div class="aggiungi-caratteristica" id="aggiungi-caratteristica">
+          <input id="nuova-car-nome" list="elenco-caratteristiche" placeholder="Caratteristica (es. Garanzia)" maxlength="120" autocomplete="off">
+          <input id="nuova-car-valore" placeholder="Valore (es. 24 mesi)" maxlength="500" autocomplete="off">
+          <button type="button" id="nuova-car" class="secondario">Aggiungi caratteristica</button>
+          <datalist id="elenco-caratteristiche"></datalist>
+        </div>
+        <p class="note">Si aggiungono solo le caratteristiche che servono a questo prodotto. Una caratteristica nuova resta disponibile per tutte le schede.</p>
       </section>
 
       <p class="riga-azioni barra-salva" id="azioni-scheda">
@@ -107,17 +128,17 @@
     </form>
 
     <section class="box" id="box-media" hidden>
-      <h3>Foto, video e documenti</h3>
-      <div class="galleria" id="galleria"></div>
+      <h3>Video e documenti</h3>
+      <ul class="lista" id="documenti"></ul>
       <div class="riga-azioni" id="carica-media">
-        <label class="pulsante-file">Aggiungi foto o PDF <input type="file" id="file" accept="image/jpeg,image/png,image/webp,application/pdf" multiple hidden></label>
+        <label class="pulsante-file secondario">Aggiungi PDF <input type="file" id="file" accept="application/pdf" multiple hidden></label>
         <form id="video" class="riga" novalidate>
           <input name="url" type="url" placeholder="https://… link a un video (YouTube, Vimeo, produttore)">
           <input name="titolo" placeholder="Titolo (facoltativo)">
           <button type="submit" class="secondario">Aggiungi video</button>
         </form>
       </div>
-      <p class="note">Foto JPEG, PNG o WebP fino a 8 MB; documenti PDF (manuale, scheda tecnica, etichetta energetica) fino a 16 MB. La prima foto è la principale.</p>
+      <p class="note">Documenti PDF (manuale, scheda tecnica, etichetta energetica) fino a 16 MB; video come link.</p>
     </section>
 
     <section class="box" id="box-varianti" hidden>
@@ -171,7 +192,7 @@
     </section>
     <section class="box">
       <h3>Caratteristiche (attributi)</h3>
-      <table class="elenco-prodotti"><thead><tr><th>Caratteristica</th><th>Tipo</th><th>Unità</th><th></th></tr></thead><tbody id="attributi-elenco"></tbody></table>
+      <table class="elenco-prodotti"><thead><tr><th>Caratteristica</th><th>Tipo</th><th>Unità</th><th>Schede</th><th></th></tr></thead><tbody id="attributi-elenco"></tbody></table>
       <form id="attributo-form" novalidate>
         <h4 id="attributo-titolo">Nuova caratteristica</h4>
         <div class="griglia-campi">
@@ -184,6 +205,12 @@
         <button type="button" id="attributo-annulla" class="secondario" hidden>Annulla</button>
       </form>
     </section>
+  </section>
+
+  <!-- Tabelle di base -->
+  <section id="vista-tabelle" hidden>
+    <p class="note">Valori usati nelle schede. Una voce usata da prodotti non si elimina e il suo codice non cambia.</p>
+    <div class="colonne-struttura" id="tabelle"></div>
   </section>
 </main>
 <div id="toast" role="status" aria-live="polite" hidden></div>

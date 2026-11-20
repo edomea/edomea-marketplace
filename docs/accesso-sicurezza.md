@@ -64,6 +64,13 @@ Un amministratore, sugli utenti che gestisce, può:
 - **Modifica di un account gestito:** il Tecnico modifica nome e cognome e nome utente degli Amministratori Operativi, l'Amministratore quelli dei suoi operatori. Nessuno modifica chi sta sopra di lui.
 - Ogni modifica va nel registro di tracciabilità con i valori prima e dopo.
 
+## 5.2 Marchio white label
+
+Il Tecnico sceglie dalla pagina **Marchio** di /techadmin (solo in HTTPS) il nome dell'attività, il colore principale e il logo, che compaiono in tutte le pagine di /admin e /techadmin (intestazione e titolo della scheda), anche in quelle di accesso.
+- Colore: deve avere contrasto almeno 4,5:1 con il testo bianco dell'intestazione, altrimenti è rifiutato.
+- Logo: PNG, JPEG o WebP (niente SVG), al massimo 512 KB, da 16 a 2000 pixel per lato; il Core controlla che sia davvero un'immagine e lo serve con `X-Content-Type-Options: nosniff`.
+- "Torna al marchio predefinito" toglie nome, colore e logo. Il marchio è nel database: va nei backup e si azzera con `emp-server azzera` (nuovo cliente).
+
 ## 6. Recovery Key dell'Amministratore Tecnico
 
 - Generata al primo setup: 25 caratteri casuali (125 bit), formato `EMP-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX`.

@@ -50,6 +50,7 @@ async function load() {
   if ($("link-plugin")) $("link-plugin").hidden = current.ruolo !== "tecnico";
   if ($("link-backup")) $("link-backup").hidden = current.ruolo !== "tecnico";
   if ($("link-sistema")) $("link-sistema").hidden = current.ruolo !== "tecnico";
+  if ($("link-marchio")) $("link-marchio").hidden = current.ruolo !== "tecnico";
   show(["links-box", "profile-box"]);
   await Promise.all([loadProfile(), loadUsers()]);
 }

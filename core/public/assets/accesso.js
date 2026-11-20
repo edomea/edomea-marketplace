@@ -13,7 +13,9 @@ const RUOLI = { amministratore: "Amministratore", operatore: "Operatore" };
 let current = null;
 
 function show(ids) {
-  for (const id of ["login-box", "password-box", "links-box", "users-box"]) $(id).hidden = !ids.includes(id);
+  for (const id of ["login-box", "password-box", "links-box", "profile-box", "users-box"]) {
+    if ($(id)) $(id).hidden = !ids.includes(id);
+  }
   $("logout").hidden = !current;
 }
 
@@ -48,9 +50,93 @@ async function load() {
   if ($("link-plugin")) $("link-plugin").hidden = current.ruolo !== "tecnico";
   if ($("link-backup")) $("link-backup").hidden = current.ruolo !== "tecnico";
   if ($("link-sistema")) $("link-sistema").hidden = current.ruolo !== "tecnico";
-  show(["links-box"]);
-  await loadUsers();
+  show(["links-box", "profile-box"]);
+  await Promise.all([loadProfile(), loadUsers()]);
 }
+
+// ---- Profilo dell'utente collegato ------------------------------------------------------------
+
+/** "2026-11-20 09:42:00" (ora del Server) → "20/11/2026 09:42". */
+function fmtDb(v) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/.exec(v || "");
+  return m ? m[3] + "/" + m[2] + "/" + m[1] + " " + m[4] + ":" + m[5] : "—";
+}
+
+async function loadProfile() {
+  let p;
+  try {
+    p = (await EMP.api("accesso/profilo")).profilo;
+  } catch (e) {
+    EMP.toast(e.message, true);
+    return;
+  }
+  $("pf-nome").textContent = p.nome;
+  $("pf-username").textContent = p.username;
+  $("pf-ruolo").textContent = p.ruolo_etichetta;
+  $("pf-creato").textContent = fmtDb(p.creato_il) + " da " + p.creato_da;
+  $("pf-modificato").textContent = fmtDb(p.modificato_il) + " da " + p.modificato_da;
+  $("pf-password").textContent = fmtDb(p.password_cambiata_il);
+  $("pf-sessioni").textContent = p.sessioni_aperte + (p.sessioni_aperte > 1 ? " (compresa questa)" : " (questa)");
+  $("pf-accessi").replaceChildren(...(p.ultimi_accessi.length
+    ? p.ultimi_accessi.map((a) => Object.assign(document.createElement("div"), { textContent: fmtDb(a.quando) + " da " + a.ip }))
+    : [document.createTextNode("—")]));
+  $("pf-falliti").textContent = String(p.tentativi_falliti);
+  const f = $("profile-form");
+  if (f.hidden) {
+    f.elements.nome.value = p.nome;
+    f.elements.username.value = p.username;
+  }
+}
+
+$("pf-modifica").addEventListener("click", async () => {
+  $("sessions-form").hidden = true;
+  $("profile-form").hidden = false;
+  await loadProfile();
+  $("profile-form").elements.nome.focus();
+});
+$("pf-annulla").addEventListener("click", () => {
+  $("profile-form").reset();
+  $("profile-form").hidden = true;
+  loadProfile();
+});
+$("profile-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const f = ev.target.elements;
+  try {
+    const out = await EMP.api("accesso/profilo", "POST", { nome: f.nome.value, username: f.username.value, password: f.password.value });
+    ev.target.reset();
+    ev.target.hidden = true;
+    current = out.utente;
+    EMP.showUser(current);
+    EMP.toast(out.messaggio);
+    await loadProfile();
+  } catch (e) {
+    f.password.value = "";
+    EMP.toast(e.message, true);
+  }
+});
+$("pf-chiudi").addEventListener("click", () => {
+  $("profile-form").hidden = true;
+  $("sessions-form").hidden = false;
+  $("sessions-form").elements.password.focus();
+});
+$("pf-chiudi-annulla").addEventListener("click", () => {
+  $("sessions-form").reset();
+  $("sessions-form").hidden = true;
+});
+$("sessions-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  try {
+    const out = await EMP.api("accesso/sessioni/chiudi-altre", "POST", { password: ev.target.elements.password.value });
+    ev.target.reset();
+    ev.target.hidden = true;
+    EMP.toast(out.messaggio);
+    await loadProfile();
+  } catch (e) {
+    ev.target.elements.password.value = "";
+    EMP.toast(e.message, true);
+  }
+});
 
 async function loadUsers() {
   const data = await EMP.api("utenti");
@@ -71,6 +157,7 @@ async function loadUsers() {
     state.textContent = !u.attivo ? "Disattivato" : (u.cambio_password ? "Password temporanea" : "Attivo");
     const actions = document.createElement("td");
     actions.append(
+      action("Modifica", "secondario", () => editUser(actions, u)),
       action("Password temporanea", "secondario", () => askPassword(actions, u)),
       action("Revoca accessi", "secondario", () => confirmIn(actions, "Chiudere tutte le sessioni di " + u.username + "?", () => post("utenti/" + u.id + "/revoca"))),
       u.attivo
@@ -96,6 +183,16 @@ function confirmIn(td, question, fn) {
   const p = document.createElement("span");
   p.textContent = question + " ";
   td.replaceChildren(p, action("Conferma", "conferma", fn), action("Annulla", "secondario", () => loadUsers()));
+}
+
+/** Modifica in riga di nome e cognome e nome utente di un utente gestito. */
+function editUser(td, user) {
+  const nome = Object.assign(document.createElement("input"), { value: user.nome, placeholder: "Nome e cognome", autocomplete: "off" });
+  const username = Object.assign(document.createElement("input"), { value: user.username, placeholder: "Nome utente", autocomplete: "off" });
+  td.replaceChildren(nome, username,
+    action("Salva", "", () => post("utenti/" + user.id + "/modifica", { nome: nome.value, username: username.value })),
+    action("Annulla", "secondario", () => loadUsers()));
+  nome.focus();
 }
 
 function askPassword(td, user) {

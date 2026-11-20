@@ -32,10 +32,14 @@ use Emp\Core\Plugin\PackageException;
  *   POST /api/v1/accesso/logout                uscita
  *   POST /api/v1/accesso/password              cambio della propria password
  *   POST /api/v1/accesso/recupero              recupero del Tecnico con Recovery Key (solo HTTPS)
+ *   GET  /api/v1/accesso/profilo               il proprio profilo: account, sessioni aperte, ultimi accessi
+ *   POST /api/v1/accesso/profilo               {password, nome, username}: modifica del proprio profilo
+ *   POST /api/v1/accesso/sessioni/chiudi-altre {password}: chiude le altre sessioni del proprio account
  *
  * Utenti (Tecnico → amministratori, amministratori → operatori)
  *   GET  /api/v1/utenti
  *   POST /api/v1/utenti                        crea con password temporanea
+ *   POST /api/v1/utenti/{id}/modifica          {nome, username}
  *   POST /api/v1/utenti/{id}/password          password temporanea
  *   POST /api/v1/utenti/{id}/revoca            revoca degli accessi (chiude le sessioni)
  *   POST /api/v1/utenti/{id}/disattiva
@@ -131,6 +135,27 @@ final class CoreModule implements ModuleInterface
             ]),
         ));
 
+        // ---- Profilo -----------------------------------------------------------------
+        $r->add('GET', '/api/v1/accesso/profilo', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
+            $user = self::requireUser($access(), $q, true);
+
+            return Response::json(['profilo' => $access()->profile($user)]);
+        }));
+
+        $r->add('POST', '/api/v1/accesso/profilo', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
+            $user = self::requireUser($access(), $q);
+            $updated = $access()->updateOwnProfile($user, $q->input('password'), $q->input('nome'), $q->input('username'), $q->remoteAddr);
+
+            return Response::json(['ok' => true, 'utente' => $updated->toArray(), 'messaggio' => 'Profilo aggiornato.']);
+        }));
+
+        $r->add('POST', '/api/v1/accesso/sessioni/chiudi-altre', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
+            $user = self::requireUser($access(), $q);
+            $n = $access()->closeOtherSessions($user, $q->input('password'), $q->cookie(self::COOKIE), $q->remoteAddr);
+
+            return Response::json(['ok' => true, 'messaggio' => $n === 0 ? 'Nessun\'altra sessione aperta.' : "Sessioni chiuse: {$n}."]);
+        }));
+
         // ---- Utenti -----------------------------------------------------------------
         $r->add('GET', '/api/v1/utenti', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
             $actor = self::requireUser($access(), $q);
@@ -146,6 +171,12 @@ final class CoreModule implements ModuleInterface
             $user = $access()->createUser($actor, $q->input('username'), $q->input('nome'), $q->input('ruolo'), $q->input('password'));
 
             return Response::json(['utente' => $user->toArray()], 201);
+        }));
+
+        $r->add('POST', '/api/v1/utenti/{id}/modifica', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {
+            $updated = $access()->updateUser(self::requireUser($access(), $q), $q->param('id'), $q->input('nome'), $q->input('username'));
+
+            return Response::json(['ok' => true, 'utente' => $updated->toArray(), 'messaggio' => 'Dati di ' . $updated->username . ' aggiornati.']);
         }));
 
         $r->add('POST', '/api/v1/utenti/{id}/password', $id, static fn (Request $q): Response => self::run(static function () use ($access, $q): Response {

@@ -283,6 +283,49 @@ final class AccessServiceTest extends TestCase
         $this->loginAs('luca', 'Nuova-Temporanea-2');
     }
 
+    /** Profilo: dati visibili, modifica di sé con password, modifica degli amministratori da parte del Tecnico. */
+    public function testProfileAndEditingAdministrators(): void
+    {
+        $this->setupTecnico();
+        [$a, $tecnico] = $this->access->login('tecnico', self::PWD_TECNICO, '10.0.0.1');
+        [$b] = $this->access->login('tecnico', self::PWD_TECNICO, '10.0.0.2');
+
+        $p = $this->access->profile($tecnico);
+        self::assertSame(['tecnico', 'Mario Tecnico', 'tecnico', 2], [$p['username'], $p['nome'], $p['ruolo'], $p['sessioni_aperte']]);
+        self::assertSame('10.0.0.2', $p['ultimi_accessi'][0]['ip']);
+        self::assertArrayNotHasKey('password_hash', $p);
+
+        // Il proprio profilo: serve la password; nome utente unico.
+        $this->expectAccessError(403, fn () => $this->access->updateOwnProfile($tecnico, 'sbagliata-12345', 'Mario Rossi', 'mario.tecnico', '10.0.0.1'));
+        $tecnico = $this->access->updateOwnProfile($tecnico, self::PWD_TECNICO, 'Mario Rossi', 'Mario.Tecnico', '10.0.0.1');
+        self::assertSame(['mario.tecnico', 'Mario Rossi'], [$tecnico->username, $tecnico->displayName]);
+        $this->expectAccessError(401, fn () => $this->access->login('tecnico', self::PWD_TECNICO, '10.0.0.1'));
+        $this->loginAs('mario.tecnico', self::PWD_TECNICO);
+        // Lo storico degli accessi segue il nuovo nome utente; le sessioni restano aperte.
+        self::assertCount(3, $this->access->profile($tecnico)['ultimi_accessi']);
+        self::assertNotNull($this->access->userForToken($b));
+
+        // Chiudere le altre sessioni: resta solo quella in uso.
+        self::assertSame(2, $this->access->closeOtherSessions($tecnico, self::PWD_TECNICO, $a, '10.0.0.1'));
+        self::assertNotNull($this->access->userForToken($a));
+        self::assertNull($this->access->userForToken($b));
+
+        // Il Tecnico modifica l'Amministratore Operativo; nome utente già in uso rifiutato.
+        $admin = $this->access->createUser($tecnico, 'anna', 'Anna', Role::AMMINISTRATORE, 'Temporanea-Admin-1');
+        $admin = $this->access->updateUser($tecnico, $admin->id, 'Anna Bianchi', 'anna.bianchi');
+        self::assertSame(['anna.bianchi', 'Anna Bianchi'], [$admin->username, $admin->displayName]);
+        $this->expectAccessError(409, fn () => $this->access->updateUser($tecnico, $admin->id, 'Anna', 'mario.tecnico'));
+        $this->expectAccessError(422, fn () => $this->access->updateUser($tecnico, $admin->id, '', 'anna.bianchi'));
+        $this->expectAccessError(422, fn () => $this->access->updateUser($tecnico, $tecnico->id, 'X', 'x.tecnico'));
+
+        // L'amministratore non modifica il Tecnico, ma modifica i suoi operatori.
+        $this->access->changeOwnPassword($this->loginAs('anna.bianchi', 'Temporanea-Admin-1'), 'Temporanea-Admin-1', 'Definitiva-Admin-1', null);
+        $anna = $this->loginAs('anna.bianchi', 'Definitiva-Admin-1');
+        $this->expectAccessError(403, fn () => $this->access->updateUser($anna, $tecnico->id, 'Preso', 'preso'));
+        $op = $this->access->createUser($anna, 'luca', 'Luca', Role::OPERATORE, 'Temporanea-Cassa-1');
+        self::assertSame('Luca Verdi', $this->access->updateUser($anna, $op->id, 'Luca Verdi', 'luca')->displayName);
+    }
+
     public function testChangeOwnPasswordKeepsCurrentSessionOnly(): void
     {
         $this->setupTecnico();

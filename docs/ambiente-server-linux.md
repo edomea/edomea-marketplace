@@ -89,22 +89,22 @@ Per copiarlo sulla VM ci sono due modi.
 
 **Dal PC Windows** (PowerShell, nella cartella dove si trova il file). `scp` è già incluso in Windows 11:
 ```
-scp emp-server-0.6.0-alpha.12.tar.gz utente@IP-DEL-SERVER:
+scp emp-server-0.6.0-alpha.13.tar.gz utente@IP-DEL-SERVER:
 ```
 
 **Direttamente sulla VM**, se ha accesso a Internet:
 ```
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.12/emp-server-0.6.0-alpha.12.tar.gz
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.12/emp-server-0.6.0-alpha.12.tar.gz.sha256
-sha256sum -c emp-server-0.6.0-alpha.12.tar.gz.sha256
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.13/emp-server-0.6.0-alpha.13.tar.gz
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.13/emp-server-0.6.0-alpha.13.tar.gz.sha256
+sha256sum -c emp-server-0.6.0-alpha.13.tar.gz.sha256
 ```
 
 ### 2.2 Eseguire l'installazione
 
 Sulla VM, dalla console o via SSH (`ssh utente@IP-DEL-SERVER`):
 ```
-tar -xzf emp-server-0.6.0-alpha.12.tar.gz
-cd emp-server-0.6.0-alpha.12
+tar -xzf emp-server-0.6.0-alpha.13.tar.gz
+cd emp-server-0.6.0-alpha.13
 sudo ./installa.sh
 ```
 

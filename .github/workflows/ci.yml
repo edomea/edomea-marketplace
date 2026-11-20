@@ -163,7 +163,7 @@ jobs:
           sudo emp-server plugin-disattiva emp-esempio
           test "$(code --cacert "$CA" "$B/api/v1/esempio")" = 404
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | jq -e '.plugin[] | select(.id == "emp-esempio") | .fermo | test("console")' >/dev/null
-          sudo emp-server moduli | grep -q 'emp-esempio: disattivato'
+          sudo emp-server moduli | grep 'emp-esempio: disattivato' >/dev/null
           if sudo emp-server plugin-disattiva emp-core; then exit 1; fi
           if sudo emp-server plugin-disattiva emp-inesistente; then exit 1; fi
           sudo emp-server plugin-riattiva emp-esempio
@@ -172,7 +172,7 @@ jobs:
           curl -fsS --cacert "$CA" "$B/api/v1/salute" | jq -e '.avvio_sicuro == true' >/dev/null
           test "$(code --cacert "$CA" "$B/api/v1/esempio")" = 404
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/plugin" | jq -e '.avvio_sicuro == true' >/dev/null
-          sudo emp-server stato | grep -q 'AVVIO SICURO attivo'
+          sudo emp-server stato | grep 'AVVIO SICURO attivo' >/dev/null
           sudo emp-server avvio-sicuro --fine
           test ! -e /etc/emp/avvio.conf
           curl -fsS --cacert "$CA" "$B/api/v1/salute" | jq -e '.avvio_sicuro == false' >/dev/null

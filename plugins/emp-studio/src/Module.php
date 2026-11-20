@@ -26,11 +26,12 @@ use Emp\Core\Module\ModuleInterface;
  *   POST /api/v1/studio/prodotti/{id}           modifica
  *   POST /api/v1/studio/prodotti/{id}/variante  nuova variante di un modello
  *   GET  /api/v1/studio/ean-interno             nuovo EAN interno (209…)
- *   POST /api/v1/studio/media?prodotto=&titolo= foto (JPEG/PNG/WebP) o PDF nel corpo
+ *   POST /api/v1/studio/media?prodotto=&titolo=&principale=1  foto (JPEG/PNG/WebP) o PDF nel corpo
  *   POST /api/v1/studio/video                   {prodotto, url, titolo}
  *   POST /api/v1/studio/media/{id}/principale · /elimina
  *   GET  /api/v1/studio/struttura
  *   POST /api/v1/studio/{categorie|marche|attributi|famiglie}[/{id}] · /{id}/elimina
+ *   POST /api/v1/studio/tabelle/{iva|um}[/{codice}] · /{codice}/elimina
  */
 final class Module implements ModuleInterface
 {
@@ -78,7 +79,10 @@ final class Module implements ModuleInterface
             $bytes = (string) stream_get_contents($in, Catalog::MAX_DOCUMENT + 1);
             fclose($in);
 
-            return ['id' => $c->upload($u, $product, $bytes, (string) $q->header('content-type'), (string) ($q->query['titolo'] ?? '')), 'messaggio' => 'File caricato.'];
+            $main = ($q->query['principale'] ?? '') === '1';
+
+            return ['id' => $c->upload($u, $product, $bytes, (string) $q->header('content-type'), (string) ($q->query['titolo'] ?? ''), $main),
+                'messaggio' => $main ? 'Immagine principale caricata.' : 'File caricato.'];
         });
         $post('/video', 'studio.modifica', static fn (Catalog $c, $u, Request $q) => ['id' => $c->addVideo($u, $q->input('prodotto'), $q->input('url'), $q->input('titolo')), 'messaggio' => 'Video aggiunto.']);
         $post('/media/{id}/principale', 'studio.modifica', static function (Catalog $c, $u, Request $q): array {
@@ -93,6 +97,17 @@ final class Module implements ModuleInterface
         });
 
         $get('/struttura', 'studio.vedi', static fn (Catalog $c) => $c->structure());
+
+        // Tabelle di base (IVA, unità di misura…): voce identificata dal codice.
+        $post('/tabelle/{tabella}', 'studio.configura', static fn (Catalog $c, $u, Request $q) => ['codice' => $c->saveTableEntry($u, $q->param('tabella'), null,
+            $q->input('codice'), $q->input('descrizione'), $q->input('valore')), 'messaggio' => 'Voce aggiunta.']);
+        $post('/tabelle/{tabella}/{codice}', 'studio.configura', static fn (Catalog $c, $u, Request $q) => ['codice' => $c->saveTableEntry($u, $q->param('tabella'),
+            $q->param('codice'), $q->input('codice'), $q->input('descrizione'), $q->input('valore')), 'messaggio' => 'Voce salvata.']);
+        $post('/tabelle/{tabella}/{codice}/elimina', 'studio.configura', static function (Catalog $c, $u, Request $q): array {
+            $c->deleteTableEntry($u, $q->param('tabella'), $q->param('codice'));
+
+            return ['messaggio' => 'Voce eliminata.'];
+        });
         foreach (['categorie', 'marche', 'attributi', 'famiglie'] as $kind) {
             $save = static function (Catalog $c, $u, Request $q, ?string $itemId) use ($kind): array {
                 $j = $q->json();

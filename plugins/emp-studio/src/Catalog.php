@@ -20,9 +20,14 @@ final class Catalog
     public const MODULE = 'emp-studio';
     public const STATES = ['bozza', 'attivo', 'archiviato'];
     public const TYPES = ['semplice', 'modello', 'variante'];
-    public const VAT = ['22', '10', '5', '4', '0'];
-    public const UNITS = ['pz', 'kg', 'g', 'l', 'm', 'mq', 'conf', 'servizio'];
-    public const ENERGY = ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'A+++', 'A++', 'A+'];
+    /**
+     * Tabelle di base gestite dalla pagina "Tabelle": codice => [nome, etichetta del valore (null = senza valore), colonna dei prodotti].
+     * Per aggiungerne una basta una voce qui (e, se serve, la colonna nei prodotti).
+     */
+    public const TABLES = [
+        'iva' => ['nome' => 'Aliquote IVA', 'valore' => 'Aliquota %', 'colonna' => 'iva'],
+        'um' => ['nome' => 'Unità di misura', 'valore' => null, 'colonna' => 'um'],
+    ];
     public const ATTRIBUTE_TYPES = ['testo', 'numero', 'si_no', 'elenco'];
     public const PHOTO_TYPES = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp'];
     public const MAX_PHOTO = 8 * 1048576;
@@ -131,8 +136,8 @@ final class Catalog
     public function product(string $id): array
     {
         $p = $this->row($id);
-        $family = $p['famiglia_id'] !== null ? $this->familyAttributes((string) $p['famiglia_id']) : [];
         $values = $this->values($id);
+        $family = $this->productAttributes($p['famiglia_id'] !== null ? (string) $p['famiglia_id'] : null, array_keys($values));
         $model = $p['modello_id'] !== null ? $this->row((string) $p['modello_id']) : null;
         $variants = [];
         if ($p['tipo'] === 'modello') {
@@ -158,7 +163,8 @@ final class Catalog
 
     /**
      * Nuovo prodotto ($id null) o modifica. Campi: tipo, sku, ean, mpn, nome, marca_id, categoria_id, famiglia_id,
-     * descrizione_breve, descrizione, iva, um, garanzia_mesi, classe_energetica, eprel, stato, valori {attributo_id: valore}.
+     * descrizione_breve, descrizione, iva, um, stato, valori {attributo_id: valore} (tutte le caratteristiche della scheda: quelle
+     * assenti si tolgono), nuove [{nome, valore}] (caratteristiche create al momento, poi disponibili per tutte le schede).
      *
      * @param array<string, mixed> $in
      */
@@ -179,25 +185,31 @@ final class Catalog
                     $d['sku'] = $this->nextSku();
                 }
                 $this->pdo->prepare("INSERT INTO {$this->t}prodotti (id, tipo, modello_id, sku, ean, ean_interno, mpn, nome, marca_id, categoria_id, famiglia_id,
-                        descrizione_breve, descrizione, iva, um, garanzia_mesi, classe_energetica, eprel, stato, completezza, creato_il, creato_da, modificato_il, modificato_da)
-                        VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)")
+                        descrizione_breve, descrizione, iva, um, stato, completezza, creato_il, creato_da, modificato_il, modificato_da)
+                        VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)")
                     ->execute([$id, $type, $d['sku'], $d['ean'], $d['ean_interno'], $d['mpn'], $d['nome'], $d['marca_id'], $d['categoria_id'], $d['famiglia_id'],
-                        $d['descrizione_breve'], $d['descrizione'], $d['iva'], $d['um'], $d['garanzia_mesi'], $d['classe_energetica'], $d['eprel'], $d['stato'],
+                        $d['descrizione_breve'], $d['descrizione'], $d['iva'], $d['um'], $d['stato'],
                         $now, $user->username, $now, $user->username]);
             } else {
                 if ($d['sku'] === null && $type !== 'modello') {
                     $d['sku'] = $before['sku'] ?? $this->nextSku();
                 }
                 $this->pdo->prepare("UPDATE {$this->t}prodotti SET sku = ?, ean = ?, ean_interno = ?, mpn = ?, nome = ?, marca_id = ?, categoria_id = ?, famiglia_id = ?,
-                        descrizione_breve = ?, descrizione = ?, iva = ?, um = ?, garanzia_mesi = ?, classe_energetica = ?, eprel = ?, stato = ?, modificato_il = ?, modificato_da = ?
+                        descrizione_breve = ?, descrizione = ?, iva = ?, um = ?, stato = ?, modificato_il = ?, modificato_da = ?
                         WHERE id = ?")
                     ->execute([$d['sku'], $d['ean'], $d['ean_interno'], $d['mpn'], $d['nome'], $d['marca_id'], $d['categoria_id'], $d['famiglia_id'],
-                        $d['descrizione_breve'], $d['descrizione'], $d['iva'], $d['um'], $d['garanzia_mesi'], $d['classe_energetica'], $d['eprel'], $d['stato'],
+                        $d['descrizione_breve'], $d['descrizione'], $d['iva'], $d['um'], $d['stato'],
                         $now, $user->username, $id]);
             }
             $valuesBefore = $before !== null ? $this->values((string) $id) : [];
             if (isset($in['valori']) && is_array($in['valori'])) {
-                $this->saveValues((string) $id, $d['famiglia_id'], $in['valori']);
+                $values = $in['valori'];
+                foreach (is_array($in['nuove'] ?? null) ? $in['nuove'] : [] as $new) {
+                    if (is_array($new) && trim((string) ($new['nome'] ?? '')) !== '') {
+                        $values[$this->attributeByName($user, (string) $new['nome'])] = $new['valore'] ?? '';
+                    }
+                }
+                $this->saveValues((string) $id, $values);
             }
             $this->refreshCompleteness((string) $id);
             $this->pdo->commit();
@@ -232,7 +244,6 @@ final class Catalog
             'sku' => $in['sku'] ?? '', 'ean' => $in['ean'] ?? '', 'mpn' => $in['mpn'] ?? '',
             'marca_id' => $model['marca_id'], 'categoria_id' => $model['categoria_id'], 'famiglia_id' => $model['famiglia_id'],
             'descrizione_breve' => $model['descrizione_breve'], 'descrizione' => $model['descrizione'], 'iva' => $model['iva'], 'um' => $model['um'],
-            'garanzia_mesi' => $model['garanzia_mesi'], 'classe_energetica' => $model['classe_energetica'], 'eprel' => $model['eprel'],
             'stato' => 'bozza', 'valori' => is_array($in['valori'] ?? null) ? $in['valori'] : [],
         ];
         $id = $this->save($user, null, $data + ['tipo' => 'semplice']);
@@ -267,7 +278,7 @@ final class Catalog
     // ================================================================== foto, video, documenti
 
     /** Foto (JPEG, PNG, WebP) o documento (PDF) caricato dalla pagina. */
-    public function upload(User $user, string $productId, string $bytes, string $mime, string $title): string
+    public function upload(User $user, string $productId, string $bytes, string $mime, string $title, bool $main = false): string
     {
         $this->row($productId);
         $mime = strtolower(trim(explode(';', $mime)[0]));
@@ -298,9 +309,12 @@ final class Catalog
             throw new ApiException('Impossibile salvare il file', 500);
         }
         @chmod($path, 0644);
-        $this->insertMedia($user, $productId, $kind, $rel, $this->cleanTitle($title), $mime, strlen($bytes));
+        $mediaId = $this->insertMedia($user, $productId, $kind, $rel, $this->cleanTitle($title), $mime, strlen($bytes), $id);
+        if ($main && $kind === 'foto') {
+            $this->makeMain($user, $mediaId);
+        }
 
-        return $id;
+        return $mediaId;
     }
 
     /** Video: collegamento (YouTube, Vimeo o sito del produttore), solo https. */
@@ -362,8 +376,9 @@ final class Catalog
         $brands = $this->pdo->query("SELECT b.id, b.nome, (SELECT COUNT(*) FROM {$this->t}prodotti p WHERE p.marca_id = b.id) AS prodotti
             FROM {$this->t}marche b ORDER BY b.nome")->fetchAll(\PDO::FETCH_ASSOC);
         $attributes = [];
-        foreach ($this->pdo->query("SELECT id, codice, nome, tipo, unita, opzioni FROM {$this->t}attributi ORDER BY nome")->fetchAll(\PDO::FETCH_ASSOC) as $a) {
+        foreach ($this->pdo->query("SELECT a.id, a.codice, a.nome, a.tipo, a.unita, a.opzioni, (SELECT COUNT(*) FROM {$this->t}valori v WHERE v.attributo_id = a.id) AS prodotti FROM {$this->t}attributi a ORDER BY a.nome")->fetchAll(\PDO::FETCH_ASSOC) as $a) {
             $a['opzioni'] = json_decode((string) $a['opzioni'], true) ?: [];
+            $a['prodotti'] = (int) $a['prodotti'];
             $attributes[] = $a;
         }
         $families = [];
@@ -379,7 +394,7 @@ final class Catalog
             'marche' => array_map(static fn (array $b): array => ['id' => $b['id'], 'nome' => $b['nome'], 'prodotti' => (int) $b['prodotti']], $brands),
             'famiglie' => $families,
             'attributi' => $attributes,
-            'iva' => self::VAT, 'unita' => self::UNITS, 'classi_energetiche' => array_values(array_filter(self::ENERGY)),
+            'tabelle' => $this->tables(),
         ];
     }
 
@@ -539,7 +554,12 @@ final class Catalog
             $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM {$this->t}famiglie_attributi WHERE attributo_id = ?");
             $stmt->execute([$id]);
             if ((int) $stmt->fetchColumn() > 0) {
-                throw new ApiException('L\'attributo è in una o più famiglie: toglierlo prima da lì', 409);
+                throw new ApiException('La caratteristica è in una o più famiglie: toglierla prima da lì', 409);
+            }
+            $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM {$this->t}valori WHERE attributo_id = ?");
+            $stmt->execute([$id]);
+            if (($n = (int) $stmt->fetchColumn()) > 0) {
+                throw new ApiException(sprintf('"%s" è compilata in %d schede: toglierla prima da lì', $row['nome'], $n), 409);
             }
             $this->pdo->prepare("DELETE FROM {$this->t}valori WHERE attributo_id = ?")->execute([$id]);
         }
@@ -584,36 +604,31 @@ final class Catalog
         }
         $d['descrizione_breve'] = $str('descrizione_breve', 1000);
         $d['descrizione'] = $str('descrizione', 20000);
-        $d['iva'] = in_array((string) ($in['iva'] ?? '22'), self::VAT, true) ? (string) ($in['iva'] ?? '22') : throw new ApiException('Aliquota IVA non valida');
-        $d['um'] = in_array((string) ($in['um'] ?? 'pz'), self::UNITS, true) ? (string) ($in['um'] ?? 'pz') : throw new ApiException('Unità di misura non valida');
-        $g = $in['garanzia_mesi'] ?? null;
-        $d['garanzia_mesi'] = $g === null || $g === '' ? null : ((is_numeric($g) && (int) $g >= 0 && (int) $g <= 120) ? (int) $g : throw new ApiException('Garanzia non valida (mesi, da 0 a 120)'));
-        $energy = strtoupper($str('classe_energetica', 8));
-        $d['classe_energetica'] = in_array($energy, self::ENERGY, true) ? $energy : throw new ApiException('Classe energetica non valida');
-        $eprel = $str('eprel', 20);
-        $d['eprel'] = $eprel === '' || preg_match('/^\d{3,12}$/', $eprel) ? $eprel : throw new ApiException('Numero di registrazione EPREL non valido (solo cifre)');
+        $d['iva'] = $this->tableValue('iva', (string) ($in['iva'] ?? ''), 'Aliquota IVA');
+        $d['um'] = $this->tableValue('um', (string) ($in['um'] ?? ''), 'Unità di misura');
         $state = (string) ($in['stato'] ?? 'bozza');
         $d['stato'] = in_array($state, self::STATES, true) ? $state : throw new ApiException('Stato non valido');
 
         return $d;
     }
 
-    /** @param array<string, mixed> $values attributo_id => valore */
-    private function saveValues(string $productId, ?string $familyId, array $values): void
+    /**
+     * Caratteristiche della scheda: sostituisce tutte quelle salvate (una caratteristica tolta dalla pagina si cancella).
+     *
+     * @param array<string, mixed> $values attributo_id => valore
+     */
+    private function saveValues(string $productId, array $values): void
     {
-        $allowed = [];
-        foreach ($familyId !== null ? $this->familyAttributes($familyId) : [] as $a) {
-            $allowed[$a['id']] = $a;
+        $all = [];
+        foreach ($this->pdo->query("SELECT id, nome, tipo, opzioni FROM {$this->t}attributi")->fetchAll(\PDO::FETCH_ASSOC) as $a) {
+            $a['opzioni'] = json_decode((string) $a['opzioni'], true) ?: [];
+            $all[(string) $a['id']] = $a;
         }
-        $del = $this->pdo->prepare("DELETE FROM {$this->t}valori WHERE prodotto_id = ? AND attributo_id = ?");
+        $this->pdo->prepare("DELETE FROM {$this->t}valori WHERE prodotto_id = ?")->execute([$productId]);
         $ins = $this->pdo->prepare("INSERT INTO {$this->t}valori (prodotto_id, attributo_id, valore) VALUES (?, ?, ?)");
         foreach ($values as $aid => $raw) {
-            $a = $allowed[(string) $aid] ?? null;
-            if ($a === null) {
-                continue; // attributo non (più) della famiglia: ignorato
-            }
+            $a = $all[(string) $aid] ?? throw new ApiException('Caratteristica non trovata (forse eliminata): ricaricare la pagina', 404);
             $v = trim(is_bool($raw) ? ($raw ? 'si' : 'no') : (string) $raw);
-            $del->execute([$productId, $aid]);
             if ($v === '') {
                 continue;
             }
@@ -628,8 +643,157 @@ final class Catalog
         }
     }
 
+    /** Caratteristica creata dalla scheda ("aggiungi caratteristica"): se il nome esiste già si usa quella. */
+    private function attributeByName(User $user, string $name): string
+    {
+        $name = $this->cleanName($name, 'Nome della caratteristica');
+        $stmt = $this->pdo->prepare("SELECT id FROM {$this->t}attributi WHERE LOWER(nome) = ?");
+        $stmt->execute([mb_strtolower($name)]);
+        $id = $stmt->fetchColumn();
+        if ($id !== false) {
+            return (string) $id;
+        }
+        $id = Uuid::v4();
+        $this->pdo->prepare("INSERT INTO {$this->t}attributi (id, codice, nome, tipo, unita, opzioni, modificato_il, modificato_da) VALUES (?, ?, ?, 'testo', '', '[]', ?, ?)")
+            ->execute([$id, $this->code('attributi', $name), $name, $this->clock->nowForDatabase(), $user->username]);
+        $this->trace($user, 'attributo.creato', $id, null, $name . ' (testo, dalla scheda)');
+
+        return $id;
+    }
+
     /**
-     * Completezza della scheda: campi base + attributi obbligatori della famiglia + almeno una foto.
+     * Caratteristiche da mostrare nella scheda: quelle della famiglia (modello di scheda) e quelle aggiunte al prodotto.
+     *
+     * @param list<string> $withValues
+     * @return list<array<string, mixed>>
+     */
+    private function productAttributes(?string $familyId, array $withValues): array
+    {
+        $out = [];
+        foreach ($familyId !== null ? $this->familyAttributes($familyId) : [] as $a) {
+            $out[$a['id']] = $a + ['famiglia' => true];
+        }
+        $extra = array_values(array_diff($withValues, array_keys($out)));
+        if ($extra !== []) {
+            $stmt = $this->pdo->prepare("SELECT id, codice, nome, tipo, unita, opzioni FROM {$this->t}attributi WHERE id IN (" . implode(',', array_fill(0, count($extra), '?')) . ') ORDER BY nome');
+            $stmt->execute($extra);
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $a) {
+                $out[(string) $a['id']] = ['id' => (string) $a['id'], 'codice' => (string) $a['codice'], 'nome' => (string) $a['nome'], 'tipo' => (string) $a['tipo'],
+                    'unita' => (string) $a['unita'], 'opzioni' => json_decode((string) $a['opzioni'], true) ?: [], 'obbligatorio' => false, 'famiglia' => false];
+            }
+        }
+
+        return array_values($out);
+    }
+
+    // ================================================================== tabelle di base (IVA, unità di misura…)
+
+    /** @return array<string, array{nome: string, valore: ?string, voci: list<array<string, mixed>>}> */
+    public function tables(): array
+    {
+        $out = [];
+        foreach (self::TABLES as $code => $def) {
+            $stmt = $this->pdo->prepare("SELECT codice, descrizione, valore, (SELECT COUNT(*) FROM {$this->t}prodotti p WHERE p.{$def['colonna']} = v.codice) AS prodotti
+                FROM {$this->t}tabelle_voci v WHERE tabella = ? ORDER BY ordine, codice");
+            $stmt->execute([$code]);
+            $out[$code] = ['nome' => $def['nome'], 'valore' => $def['valore'], 'voci' => array_map(static fn (array $r): array => [
+                'codice' => (string) $r['codice'], 'descrizione' => (string) $r['descrizione'], 'valore' => (string) $r['valore'], 'prodotti' => (int) $r['prodotti'],
+            ], $stmt->fetchAll(\PDO::FETCH_ASSOC))];
+        }
+
+        return $out;
+    }
+
+    /** Nuova voce ($old null) o modifica; il codice di una voce usata dai prodotti non si cambia. */
+    public function saveTableEntry(User $user, string $table, ?string $old, string $code, string $description, string $value): string
+    {
+        $def = self::TABLES[$table] ?? throw new ApiException('Tabella non trovata', 404);
+        $code = trim($code);
+        if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]{0,15}$/', $code)) {
+            throw new ApiException('Codice non valido: fino a 16 caratteri tra lettere, cifre, - e _ (es. 22, N4, pz)');
+        }
+        $description = $this->cleanName($description, 'Descrizione');
+        $value = trim($value);
+        if ($def['valore'] !== null) {
+            $value = str_replace(',', '.', $value);
+            if (!is_numeric($value) || (float) $value < 0 || (float) $value > 100) {
+                throw new ApiException($def['valore'] . ': un numero da 0 a 100');
+            }
+            $value = rtrim(rtrim(number_format((float) $value, 2, '.', ''), '0'), '.');
+        } else {
+            $value = '';
+        }
+        $now = $this->clock->nowForDatabase();
+        try {
+            if ($old === null) {
+                $order = $this->pdo->prepare("SELECT COALESCE(MAX(ordine), 0) + 1 FROM {$this->t}tabelle_voci WHERE tabella = ?");
+                $order->execute([$table]);
+                $this->pdo->prepare("INSERT INTO {$this->t}tabelle_voci (tabella, codice, descrizione, valore, ordine, modificato_il, modificato_da) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                    ->execute([$table, $code, $description, $value, (int) $order->fetchColumn(), $now, $user->username]);
+                $this->trace($user, 'tabella.voce_creata', $table . ':' . $code, null, $description . ($value !== '' ? ' (' . $value . ')' : ''));
+            } else {
+                $row = $this->tableEntry($table, $old);
+                if ($code !== $old && $this->tableUsage($table, $old) > 0) {
+                    throw new ApiException('Il codice "' . $old . '" è usato da prodotti: si può cambiare solo la descrizione', 409);
+                }
+                $this->pdo->prepare("UPDATE {$this->t}tabelle_voci SET codice = ?, descrizione = ?, valore = ?, modificato_il = ?, modificato_da = ? WHERE tabella = ? AND codice = ?")
+                    ->execute([$code, $description, $value, $now, $user->username, $table, $old]);
+                $this->trace($user, 'tabella.voce_modificata', $table . ':' . $code, $row, ['codice' => $code, 'descrizione' => $description, 'valore' => $value]);
+            }
+        } catch (\PDOException $e) {
+            throw $this->duplicate($e, 'Esiste già una voce con il codice "' . $code . '"');
+        }
+
+        return $code;
+    }
+
+    public function deleteTableEntry(User $user, string $table, string $code): void
+    {
+        self::TABLES[$table] ?? throw new ApiException('Tabella non trovata', 404);
+        $row = $this->tableEntry($table, $code);
+        if (($n = $this->tableUsage($table, $code)) > 0) {
+            throw new ApiException(sprintf('"%s" è usato da %d prodotti: cambiarlo prima nelle schede', $row['descrizione'], $n), 409);
+        }
+        $this->pdo->prepare("DELETE FROM {$this->t}tabelle_voci WHERE tabella = ? AND codice = ?")->execute([$table, $code]);
+        $this->trace($user, 'tabella.voce_eliminata', $table . ':' . $code, $row, null);
+    }
+
+    /** @return array<string, mixed> */
+    private function tableEntry(string $table, string $code): array
+    {
+        $stmt = $this->pdo->prepare("SELECT codice, descrizione, valore FROM {$this->t}tabelle_voci WHERE tabella = ? AND codice = ?");
+        $stmt->execute([$table, $code]);
+        $r = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        return is_array($r) ? $r : throw new ApiException('Voce non trovata', 404);
+    }
+
+    private function tableUsage(string $table, string $code): int
+    {
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM {$this->t}prodotti WHERE " . self::TABLES[$table]['colonna'] . ' = ?');
+        $stmt->execute([$code]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** Valore di un campo della scheda preso da una tabella; vuoto = prima voce della tabella. */
+    private function tableValue(string $table, string $code, string $label): string
+    {
+        if ($code === '') {
+            $stmt = $this->pdo->prepare("SELECT codice FROM {$this->t}tabelle_voci WHERE tabella = ? ORDER BY ordine, codice LIMIT 1");
+            $stmt->execute([$table]);
+            $first = $stmt->fetchColumn();
+
+            return $first !== false ? (string) $first : throw new ApiException($label . ': la tabella è vuota, aggiungere una voce in "Tabelle"');
+        }
+        $stmt = $this->pdo->prepare("SELECT COUNT(*) FROM {$this->t}tabelle_voci WHERE tabella = ? AND codice = ?");
+        $stmt->execute([$table, $code]);
+
+        return (int) $stmt->fetchColumn() > 0 ? $code : throw new ApiException($label . ' non valida: scegliere una voce della tabella');
+    }
+
+    /**
+     * Completezza della scheda: campi base + almeno una foto + caratteristiche obbligatorie della famiglia (se scelta).
      *
      * @param array<string, mixed> $p
      * @return array{percentuale: int, mancanti: list<string>}
@@ -641,7 +805,6 @@ final class Catalog
             'Nome' => $p['nome'] !== '',
             'Marca' => $p['marca_id'] !== null,
             'Categoria' => $p['categoria_id'] !== null,
-            'Famiglia' => $p['famiglia_id'] !== null,
             'Descrizione breve' => trim((string) $p['descrizione_breve']) !== '',
         ];
         if ($p['tipo'] !== 'modello') {
@@ -722,9 +885,9 @@ final class Catalog
         ], $stmt->fetchAll(\PDO::FETCH_ASSOC));
     }
 
-    private function insertMedia(User $user, string $productId, string $kind, string $path, string $title, string $mime, int $bytes): string
+    private function insertMedia(User $user, string $productId, string $kind, string $path, string $title, string $mime, int $bytes, ?string $id = null): string
     {
-        $id = Uuid::v4();
+        $id ??= Uuid::v4();
         $order = $this->pdo->prepare("SELECT COALESCE(MAX(ordine), -1) + 1 FROM {$this->t}media WHERE prodotto_id = ? AND tipo = ?");
         $order->execute([$productId, $kind]);
         $this->pdo->prepare("INSERT INTO {$this->t}media (id, prodotto_id, tipo, percorso, titolo, mime, byte, ordine, creato_il, creato_da) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
@@ -772,7 +935,6 @@ final class Catalog
     {
         $r['completezza'] = (int) $r['completezza'];
         $r['ean_interno'] = (int) $r['ean_interno'] === 1;
-        $r['garanzia_mesi'] = $r['garanzia_mesi'] !== null ? (int) $r['garanzia_mesi'] : null;
 
         return $r;
     }
@@ -780,7 +942,7 @@ final class Catalog
     /** @param array<string, mixed> $r @return array<string, mixed> */
     private function snapshot(array $r): array
     {
-        $keep = ['tipo', 'sku', 'ean', 'mpn', 'nome', 'marca_id', 'categoria_id', 'famiglia_id', 'iva', 'um', 'garanzia_mesi', 'classe_energetica', 'eprel', 'stato'];
+        $keep = ['tipo', 'sku', 'ean', 'mpn', 'nome', 'marca_id', 'categoria_id', 'famiglia_id', 'iva', 'um', 'stato'];
         $out = array_intersect_key($r, array_flip($keep));
         $out['descrizione_breve'] = mb_substr((string) $r['descrizione_breve'], 0, 300);
         $out['descrizione_hash'] = substr(hash('sha256', (string) $r['descrizione']), 0, 12);

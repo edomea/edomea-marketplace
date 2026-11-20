@@ -54,3 +54,31 @@ ul.albero li small, ul.lista li small { color: var(--emp-tenue); }
 .scelta-attributi label input { width: auto; margin: 0; }
 .scelta-attributi select { width: auto; margin: 0 0 0 auto; padding: 3px 6px; }
 @media (max-width: 800px) { .filtri button { margin-left: 0; } }
+
+/* 0.2.0: foto principale e galleria, caratteristiche a righe, tabelle */
+.foto-prodotto { display: grid; grid-template-columns: minmax(220px, 320px) 1fr; gap: 20px; align-items: start; }
+.foto-principale img { width: 100%; aspect-ratio: 1; object-fit: contain; background: #fff; border: 2px solid var(--emp-blu); border-radius: 10px; display: block; }
+.foto-principale .vuota { aspect-ratio: 1; display: flex; align-items: center; justify-content: center; border: 2px dashed #afc4ca; border-radius: 10px; color: var(--emp-tenue); background: #fff; }
+.foto-principale .riga-azioni { justify-content: space-between; margin: 6px 0 0; }
+.foto-galleria h4 { margin: 0 0 8px; }
+.foto-galleria .galleria { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+.foto-galleria .galleria img { height: 100px; }
+#box-foto.trascina { outline: 3px dashed var(--emp-blu); outline-offset: -6px; }
+.pulsante-file.secondario { background: #5d6b72; }
+.caratteristiche { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 6px 20px; }
+.riga-car { display: grid; grid-template-columns: 170px 1fr 34px; gap: 8px; align-items: center; }
+.riga-car .nome-car { font-weight: 500; overflow-wrap: anywhere; }
+.riga-car .nome-car small { color: var(--emp-tenue); font-weight: 400; }
+.riga-car .nome-car small.nuova { color: #7a5600; background: #fff3d6; padding: 0 6px; border-radius: 8px; }
+.riga-car input, .riga-car select { margin: 0; }
+.aggiungi-caratteristica { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid #eef2f3; }
+.aggiungi-caratteristica input { margin: 0; flex: 1 1 200px; }
+.aggiungi-caratteristica button { margin: 0; }
+.form-voce { flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.form-voce h4 { width: 100%; margin: 0; }
+.form-voce input { margin: 0; flex: 1 1 120px; }
+.form-voce button { margin: 0; }
+#documenti a { margin-left: 4px; }
+@media (max-width: 800px) { .foto-prodotto { grid-template-columns: 1fr; } .riga-car { grid-template-columns: 120px 1fr 34px; } }
+#tabelle td.riga-azioni { flex-wrap: nowrap; white-space: nowrap; }
+#tabelle td { vertical-align: middle; }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Emp\Core;
 
 use Emp\Core\Access\AccessService;
+use Emp\Core\Access\JobRoleService;
 use Emp\Core\Access\WorkstationService;
 use Emp\Core\Backup\BackupBridge;
 use Emp\Core\Brand\BrandService;
@@ -146,6 +147,12 @@ final class Kernel
     public function access(): AccessService
     {
         return $this->access ??= new AccessService($this->installer->pdo(), $this->installer->tablePrefix('core_'), $this->clock);
+    }
+
+    /** Ruoli di negozio con i permessi dei moduli avviati (per i plugin: allows($user, 'permesso')). */
+    public function jobRoles(): JobRoleService
+    {
+        return new JobRoleService($this->installer->pdo(), $this->installer->tablePrefix('core_'), $this->clock, $this->booted);
     }
 
     /** Postazioni autorizzate del negozio. */

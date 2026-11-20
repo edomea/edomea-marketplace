@@ -116,4 +116,42 @@ final class WorkstationTest extends TestCase
         $lan = ['host' => '192.168.1.10', 'x-emp-richiesta' => '1'];
         self::assertSame(403, $k->handle(new Request('POST', '/api/v1/postazioni/associa', $lan, '192.168.1.20', '{"codice":"AAAA-BBBB"}'))->status);
     }
+
+    /** Ruoli di negozio: iniziali dal manuale, permessi dei moduli, assegnazione agli operatori. */
+    public function testJobRoles(): void
+    {
+        $access = $this->kernel->access();
+        $this->kernel->boot();
+        $roles = $this->kernel->jobRoles();
+        [, $tecnico] = $access->login('tecnico', self::PWD, '127.0.0.1');
+        $codes = array_column($roles->list(), 'codice');
+        foreach (['cassiere', 'magazziniere', 'store-manager', 'area-manager', 'contabilita'] as $c) {
+            self::assertContains($c, $codes);
+        }
+
+        // Il Tecnico crea direttamente un operatore e gli assegna ruoli.
+        $op = $access->createUser($tecnico, 'gina', 'Gina Cassa', Role::OPERATORE, 'Temporanea-Cassa-1');
+        $roles->assign($tecnico, $access->manageable($tecnico, $op->id), ['cassiere', 'magazziniere']);
+        self::assertSame(['cassiere', 'magazziniere'], $roles->assignmentsByUser()[$op->id]);
+        $this->error(422, fn () => $roles->assign($tecnico, $op, ['inesistente']));
+
+        // Un ruolo nuovo con permessi dei moduli avviati (solo il Core qui: nessun permesso).
+        $this->error(422, fn () => $roles->save($tecnico, null, 'Vetrinista', 'Allestimenti', ['magazzino.carico']));
+        $code = $roles->save($tecnico, null, 'Vetrinista', 'Allestimenti', []);
+        self::assertSame('vetrinista', $code);
+        self::assertSame('vetrinista-2', $roles->save($tecnico, null, 'Vetrinista', '', []));
+        $roles->save($tecnico, $code, 'Vetrinista senior', 'Allestimenti e vetrine', []);
+        self::assertContains('Vetrinista senior', array_column($roles->list(), 'nome'));
+
+        // Un ruolo assegnato non si elimina; libero sì.
+        $this->error(409, fn () => $roles->delete($tecnico, 'cassiere'));
+        $roles->delete($tecnico, 'vetrinista-2');
+        self::assertNotContains('vetrinista-2', array_column($roles->list(), 'codice'));
+
+        // Permessi: operatore = unione dei ruoli; il Tecnico non ha permessi gestionali; gli operatori non gestiscono ruoli.
+        self::assertSame([], $roles->permissionsFor($tecnico));
+        self::assertFalse($roles->allows($op, 'esempio.leggi'));
+        $this->error(403, fn () => $roles->save($op, null, 'X', '', []));
+        $this->error(422, fn () => $roles->assign($tecnico, $tecnico, ['cassiere']));
+    }
 }

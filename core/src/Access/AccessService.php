@@ -378,9 +378,10 @@ final class AccessService
     /** @return list<User> l'utente stesso e quelli che può gestire */
     public function listUsers(User $actor): array
     {
-        $managed = Role::managedBy($actor->role);
-        $stmt = $this->pdo->prepare("SELECT * FROM {$this->users} WHERE id = ? OR role = ? ORDER BY role, username");
-        $stmt->execute([$actor->id, $managed ?? '-']);
+        $managed = Role::managedRoles($actor->role);
+        $in = implode(', ', array_fill(0, count($managed) + 1, '?'));
+        $stmt = $this->pdo->prepare("SELECT * FROM {$this->users} WHERE id = ? OR role IN ({$in}) ORDER BY role, username");
+        $stmt->execute([$actor->id, ...$managed, '-']);
 
         return array_map(User::fromRow(...), $stmt->fetchAll(\PDO::FETCH_ASSOC));
     }
@@ -438,6 +439,12 @@ final class AccessService
             $target->active ? 'attivo' : 'disattivo',
             $active ? 'attivo' : 'disattivo',
         );
+    }
+
+    /** Utente che $actor può gestire (per le operazioni di altri servizi, es. i ruoli). */
+    public function manageable(User $actor, string $targetId): User
+    {
+        return $this->managedTarget($actor, $targetId);
     }
 
     // ------------------------------------------------------------------ interni

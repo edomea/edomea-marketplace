@@ -107,17 +107,48 @@
   <section id="users-box" class="box" hidden>
     <h2 id="users-title">Utenti</h2>
     <table id="users">
-      <thead><tr><th>Utente</th><th>Ruolo</th><th>Stato</th><th></th></tr></thead>
+      <thead><tr><th>Utente</th><th>Livello</th><th>Ruoli</th><th>Stato</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
     <h3 id="new-title">Nuovo utente</h3>
-    <form id="new-user" class="riga" novalidate>
-      <label>Nome utente <input name="username" autocomplete="off" required></label>
-      <label>Nome e cognome <input name="nome" autocomplete="off" required></label>
-      <label>Password temporanea <input name="password" type="password" autocomplete="new-password" required></label>
+    <form id="new-user" novalidate>
+      <div class="griglia-campi">
+        <label>Nome utente <input name="username" autocomplete="off" required></label>
+        <label>Nome e cognome <input name="nome" autocomplete="off" required></label>
+        <label>Password temporanea <input name="password" type="password" autocomplete="new-password" required></label>
+        <label id="new-livello-riga" hidden>Livello
+          <select name="livello" id="new-livello">
+            <option value="operatore">Operatore (cassa, magazzino… secondo i ruoli)</option>
+            <option value="amministratore">Amministratore Operativo (tutto il gestionale e gli operatori)</option>
+          </select></label>
+      </div>
+      <fieldset id="new-ruoli" class="scelta-ruoli"><legend>Ruoli dell'operatore</legend></fieldset>
       <button type="submit">Crea</button>
     </form>
-    <p class="note">La password temporanea va comunicata di persona; l'utente dovrà cambiarla al primo accesso.</p>
+    <p class="note">La password temporanea va comunicata di persona; l'utente dovrà cambiarla al primo accesso. I ruoli si possono
+      cambiare in ogni momento con "Ruoli" nell'elenco.</p>
+  </section>
+
+  <!-- Ruoli di negozio e permessi -->
+  <section id="roles-box" class="box" hidden>
+    <h2>Ruoli e permessi</h2>
+    <p class="note">Un ruolo (Cassiere, Magazziniere…) è un insieme di permessi; un operatore può averne più di uno. Gli amministratori
+      hanno già tutti i permessi gestionali. I permessi li portano i plugin installati.</p>
+    <table id="roles">
+      <thead><tr><th>Ruolo</th><th>Permessi</th><th>Utenti</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <p><button type="button" id="role-new" class="secondario">Nuovo ruolo</button></p>
+    <form id="role-form" class="box" novalidate hidden>
+      <h3 id="role-form-title">Nuovo ruolo</h3>
+      <div class="griglia-campi">
+        <label>Nome <input name="nome" maxlength="80" autocomplete="off" required></label>
+        <label>Descrizione <input name="descrizione" maxlength="255" autocomplete="off"></label>
+      </div>
+      <div id="role-perms"></div>
+      <button type="submit">Salva</button>
+      <button type="button" id="role-cancel" class="secondario">Annulla</button>
+    </form>
   </section>
 </main>
 <div id="toast" role="status" aria-live="polite" hidden></div>

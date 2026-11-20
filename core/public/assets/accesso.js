@@ -10,10 +10,12 @@ const $ = (id) => document.getElementById(id);
 const AREA = document.body.dataset.area;
 const AREA_DEL_RUOLO = (ruolo) => (ruolo === "tecnico" ? "techadmin" : "admin");
 const RUOLI = { amministratore: "Amministratore", operatore: "Operatore" };
+let jobRoles = [];      // ruoli di negozio (Cassiere, Magazziniere…)
+let permCatalog = [];   // permessi dichiarati dai moduli avviati
 let current = null;
 
 function show(ids) {
-  for (const id of ["login-box", "password-box", "links-box", "cc-box", "profile-box", "ws-box", "users-box"]) {
+  for (const id of ["login-box", "password-box", "links-box", "cc-box", "profile-box", "ws-box", "users-box", "roles-box"]) {
     if ($(id)) $(id).hidden = !ids.includes(id);
   }
   $("logout").hidden = !current;
@@ -263,11 +265,17 @@ $("sessions-form").addEventListener("submit", async (ev) => {
 
 async function loadUsers() {
   const data = await EMP.api("utenti");
-  if (!data.gestibile) return;
+  const managed = data.gestibili || (data.gestibile ? [data.gestibile] : []);
+  if (!managed.length) return;
+  await loadRoles();
   $("users-box").hidden = false;
-  $("users-title").textContent = data.gestibile === "amministratore" ? "Amministratori" : "Operatori";
-  $("new-title").textContent = "Nuovo " + RUOLI[data.gestibile].toLowerCase();
-  $("new-user").dataset.ruolo = data.gestibile;
+  $("users-title").textContent = managed.length > 1 ? "Amministratori e operatori" : "Operatori";
+  $("new-title").textContent = managed.length > 1 ? "Nuovo utente" : "Nuovo operatore";
+  $("new-livello-riga").hidden = managed.length < 2;
+  if (managed.length < 2) $("new-livello").value = managed[0];
+  renderRoleChoices($("new-ruoli"), []);
+  $("new-ruoli").hidden = $("new-livello").value !== "operatore";
+  const names = Object.fromEntries(jobRoles.map((r) => [r.codice, r.nome]));
   const body = $("users").querySelector("tbody");
   body.replaceChildren();
   for (const u of data.utenti.filter((x) => x.id !== current.id)) {
@@ -276,21 +284,143 @@ async function loadUsers() {
     who.textContent = u.nome + " (" + u.username + ")";
     const role = document.createElement("td");
     role.textContent = u.ruolo_etichetta;
+    const jobs = document.createElement("td");
+    jobs.textContent = u.ruolo === "operatore"
+      ? ((u.ruoli || []).map((c) => names[c] || c).join(", ") || "nessun ruolo")
+      : (u.ruolo === "amministratore" ? "tutti i permessi" : "—");
     const state = document.createElement("td");
     state.textContent = !u.attivo ? "Disattivato" : (u.cambio_password ? "Password temporanea" : "Attivo");
     const actions = document.createElement("td");
     actions.append(
       action("Modifica", "secondario", () => editUser(actions, u)),
+      ...(u.ruolo === "operatore" ? [action("Ruoli", "secondario", () => editUserRoles(actions, u))] : []),
       action("Password temporanea", "secondario", () => askPassword(actions, u)),
       action("Revoca accessi", "secondario", () => confirmIn(actions, "Chiudere tutte le sessioni di " + u.username + "?", () => post("utenti/" + u.id + "/revoca"))),
       u.attivo
         ? action("Disattiva", "conferma", () => confirmIn(actions, "Disattivare " + u.username + "?", () => post("utenti/" + u.id + "/disattiva")))
         : action("Riattiva", "", () => post("utenti/" + u.id + "/attiva")),
     );
-    tr.append(who, role, state, actions);
+    tr.append(who, role, jobs, state, actions);
     body.appendChild(tr);
   }
 }
+
+// ---- Ruoli di negozio e permessi ---------------------------------------------------------------
+
+async function loadRoles() {
+  let data;
+  try {
+    data = await EMP.api("ruoli");
+  } catch (e) {
+    return;
+  }
+  jobRoles = data.ruoli;
+  permCatalog = data.permessi;
+  $("roles-box").hidden = false;
+  const body = $("roles").querySelector("tbody");
+  body.replaceChildren();
+  for (const r of jobRoles) {
+    const tr = document.createElement("tr");
+    const name = document.createElement("td");
+    name.textContent = r.nome;
+    if (r.descrizione) name.appendChild(Object.assign(document.createElement("small"), { textContent: r.descrizione }));
+    const perms = document.createElement("td");
+    perms.textContent = r.permessi.length ? r.permessi.length + (r.permessi.length === 1 ? " permesso" : " permessi") : "nessuno";
+    perms.title = r.permessi.join(", ");
+    const users = document.createElement("td");
+    users.textContent = String(r.utenti);
+    const actions = document.createElement("td");
+    actions.append(
+      action("Modifica", "secondario", () => openRoleForm(r)),
+      action("Elimina", "conferma", () => confirmIn(actions, "Eliminare il ruolo " + r.nome + "?", () => rolePost("ruoli/" + r.codice + "/elimina"))),
+    );
+    tr.append(name, perms, users, actions);
+    body.appendChild(tr);
+  }
+}
+
+/** Caselle dei ruoli (per la creazione di un operatore o la modifica dei suoi ruoli). */
+function renderRoleChoices(container, selected) {
+  const legend = container.querySelector("legend");
+  container.replaceChildren(...(legend ? [legend] : []));
+  for (const r of jobRoles) {
+    const label = document.createElement("label");
+    label.className = "spunta";
+    const box = Object.assign(document.createElement("input"), { type: "checkbox", value: r.codice, checked: selected.includes(r.codice) });
+    label.append(box, " " + r.nome);
+    container.appendChild(label);
+  }
+}
+
+const checkedValues = (container) => [...container.querySelectorAll("input[type=checkbox]:checked")].map((b) => b.value);
+
+function editUserRoles(td, user) {
+  const box = document.createElement("div");
+  box.className = "scelta-ruoli";
+  renderRoleChoices(box, user.ruoli || []);
+  td.replaceChildren(box,
+    action("Salva", "", () => post("utenti/" + user.id + "/ruoli", { ruoli: checkedValues(box) })),
+    action("Annulla", "secondario", () => loadUsers()));
+}
+
+function openRoleForm(role) {
+  const f = $("role-form");
+  f.dataset.codice = role ? role.codice : "";
+  $("role-form-title").textContent = role ? "Modifica il ruolo " + role.nome : "Nuovo ruolo";
+  f.elements.nome.value = role ? role.nome : "";
+  f.elements.descrizione.value = role ? role.descrizione : "";
+  const box = $("role-perms");
+  box.replaceChildren();
+  if (!permCatalog.length && !(role && role.permessi.length)) {
+    box.appendChild(Object.assign(document.createElement("p"), { className: "note",
+      textContent: "Nessun permesso disponibile: arrivano con i plugin (Cassa, Magazzino…). Il ruolo si può creare ora e completare dopo." }));
+  }
+  // Permessi raggruppati per modulo; quelli assegnati di moduli non più avviati restano visibili.
+  const groups = new Map();
+  for (const p of permCatalog) {
+    if (!groups.has(p.nome_modulo)) groups.set(p.nome_modulo, []);
+    groups.get(p.nome_modulo).push(p.permesso);
+  }
+  const orphan = role ? role.permessi.filter((p) => !permCatalog.some((c) => c.permesso === p)) : [];
+  if (orphan.length) groups.set("Moduli non avviati", orphan);
+  for (const [module, perms] of groups) {
+    const fs = document.createElement("fieldset");
+    fs.className = "scelta-ruoli";
+    fs.appendChild(Object.assign(document.createElement("legend"), { textContent: module }));
+    for (const p of perms) {
+      const label = document.createElement("label");
+      label.className = "spunta";
+      label.append(Object.assign(document.createElement("input"), { type: "checkbox", value: p, checked: !!role && role.permessi.includes(p) }), " " + p);
+      fs.appendChild(label);
+    }
+    box.appendChild(fs);
+  }
+  f.hidden = false;
+  f.elements.nome.focus();
+}
+
+async function rolePost(path, body) {
+  try {
+    const out = await EMP.api(path, "POST", body || {});
+    EMP.toast(out.messaggio || "Fatto");
+    $("role-form").hidden = true;
+  } catch (e) {
+    EMP.toast(e.message, true);
+  }
+  await loadUsers();
+}
+
+$("role-new").addEventListener("click", () => openRoleForm(null));
+$("role-cancel").addEventListener("click", () => { $("role-form").hidden = true; });
+$("role-form").addEventListener("submit", (ev) => {
+  ev.preventDefault();
+  const f = ev.target;
+  const code = f.dataset.codice;
+  rolePost(code ? "ruoli/" + code : "ruoli", {
+    nome: f.elements.nome.value, descrizione: f.elements.descrizione.value, permessi: checkedValues($("role-perms")),
+  });
+});
+$("new-livello").addEventListener("change", (ev) => { $("new-ruoli").hidden = ev.target.value !== "operatore"; });
 
 function action(label, cls, fn) {
   const b = document.createElement("button");
@@ -370,11 +500,13 @@ $("new-user").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const f = new FormData(ev.target);
   try {
+    const livello = $("new-livello").value;
     await EMP.api("utenti", "POST", {
       username: String(f.get("username")),
       nome: String(f.get("nome")),
       password: String(f.get("password")),
-      ruolo: ev.target.dataset.ruolo,
+      ruolo: livello,
+      ruoli: livello === "operatore" ? checkedValues($("new-ruoli")) : [],
     });
     ev.target.reset();
     EMP.toast("Utente creato. Dovrà cambiare la password al primo accesso.");

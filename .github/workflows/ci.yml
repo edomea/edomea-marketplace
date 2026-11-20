@@ -150,6 +150,11 @@ jobs:
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/postazioni/obbligo" -d '{"attivo":true}' | jq -e .ok >/dev/null
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/postazioni" | jq -e '.obbligatorie and (.postazioni | length) == 1' >/dev/null
           curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/postazioni/obbligo" -d '{"attivo":false}' | jq -e .ok >/dev/null
+          # Ruoli di negozio: quelli del manuale, operatore creato dal Tecnico con i suoi ruoli.
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/ruoli" | jq -e '[.ruoli[].codice] | index("cassiere") != null and index("magazziniere") != null' >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/utenti" \
+            -d '{"username":"cassa.ci","nome":"Cassa CI","password":"Temporanea-Cassa-CI","ruolo":"operatore","ruoli":["cassiere"]}' | jq -e '.utente.ruolo == "operatore"' >/dev/null
+          curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/utenti" | jq -e '.utenti[] | select(.username == "cassa.ci") | .ruoli == ["cassiere"]' >/dev/null
           # Profilo del Tecnico: visibile, modificabile solo con la password.
           curl -fsS -b "$RUNNER_TEMP/jar" --cacert "$CA" "$B/api/v1/accesso/profilo" | jq -e '.profilo.username == "tecnico" and .profilo.sessioni_aperte >= 1' >/dev/null
           test "$(code -b "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/profilo" -d '{"nome":"X","username":"tecnico","password":"sbagliata"}')" = 403

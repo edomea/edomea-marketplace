@@ -228,7 +228,6 @@ final class AccessServiceTest extends TestCase
         // Il Tecnico crea amministratori, non operatori.
         $admin = $this->access->createUser($tecnico, 'anna.admin', 'Anna Admin', Role::AMMINISTRATORE, 'Temporanea-Admin-1');
         self::assertTrue($admin->mustChangePassword);
-        $this->expectAccessError(403, fn () => $this->access->createUser($tecnico, 'op', 'Op', Role::OPERATORE, 'Temporanea-Op-123'));
         $this->expectAccessError(403, fn () => $this->access->createUser($tecnico, 'tec2', 'T2', Role::TECNICO, 'Temporanea-Tec-123'));
         $this->expectAccessError(409, fn () => $this->access->createUser($tecnico, 'anna.admin', 'Doppia', Role::AMMINISTRATORE, 'Temporanea-Admin-2'));
 
@@ -244,12 +243,12 @@ final class AccessServiceTest extends TestCase
         $this->expectAccessError(403, fn () => $this->access->createUser($adminUser, 'b', 'B', Role::AMMINISTRATORE, 'Temporanea-Admin-9'));
         $this->expectAccessError(403, fn () => $this->access->setTemporaryPassword($adminUser, $tecnico->id, 'Presa-Di-Possesso-1'));
         $this->expectAccessError(403, fn () => $this->access->revokeAccess($adminUser, $tecnico->id));
-        // Il Tecnico non gestisce direttamente gli operatori.
-        $this->expectAccessError(403, fn () => $this->access->revokeAccess($tecnico, $op->id));
+        // Il Tecnico gestisce anche gli operatori (creazione, ruoli, revoca).
+        self::assertSame(0, $this->access->revokeAccess($tecnico, $op->id));
         // Le operazioni amministrative non si fanno su se stessi.
         $this->expectAccessError(422, fn () => $this->access->setActive($adminUser, $adminUser->id, false));
 
-        self::assertSame(['anna.admin', 'tecnico'], array_map(static fn (User $u) => $u->username, $this->access->listUsers($tecnico)));
+        self::assertSame(['anna.admin', 'luca.cassa', 'tecnico'], array_map(static fn (User $u) => $u->username, $this->access->listUsers($tecnico)));
         self::assertSame(['anna.admin', 'luca.cassa'], array_map(static fn (User $u) => $u->username, $this->access->listUsers($adminUser)));
     }
 

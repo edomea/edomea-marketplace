@@ -64,6 +64,14 @@ Un amministratore, sugli utenti che gestisce, può:
 - **Modifica di un account gestito:** il Tecnico modifica nome e cognome e nome utente degli Amministratori Operativi, l'Amministratore quelli dei suoi operatori. Nessuno modifica chi sta sopra di lui.
 - Ogni modifica va nel registro di tracciabilità con i valori prima e dopo.
 
+## 5.0 Ruoli di negozio e permessi
+
+Oltre ai livelli di accesso (Tecnico, Amministratore, Operatore) ci sono i **ruoli di negozio**: Cassiere, Store Manager, Area Manager, Responsabile Reparto, Commerciale, Supervisor / Direttore Commerciale, Buyer, Responsabile Logistica, Magazziniere, Contabilità (dal manuale, §04), modificabili e ampliabili.
+- Un ruolo è un **insieme di permessi**; i permessi li dichiarano i plugin (campo `permissions` di `emp-module.json`) e compaiono da soli quando il plugin è installato.
+- A un **operatore** si assegnano uno o più ruoli: ha l'unione dei loro permessi. Gli **amministratori** hanno tutti i permessi gestionali; il **Tecnico** nessuno (funzioni tecniche).
+- Creano operatori e assegnano ruoli sia il Tecnico (/techadmin) sia gli amministratori (/admin); entrambi gestiscono anche l'elenco dei ruoli. Un ruolo assegnato non si può eliminare.
+- Nei plugin il controllo è `$kernel->jobRoles()->allows($utente, 'magazzino.carico')`. Ogni modifica è tracciata con i valori prima e dopo.
+
 ## 5.1.1 Postazioni autorizzate
 
 Le postazioni sono i browser dei PC e dei tablet del negozio. Una postazione autorizzata conserva un token permanente nel cookie `emp_postazione` (HttpOnly, solo HTTPS, 5 anni); nel database c'è solo la sua impronta.

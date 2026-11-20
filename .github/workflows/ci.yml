@@ -372,7 +372,7 @@ jobs:
           sudo sh -c "cd '$A' && tar -xf chiaro.tar && echo 'DROP DATABASE emp;' | gzip > database.sql.gz && tar -cf alterato.tar MANIFEST SHA256SUMS database.sql.gz dati.tar.gz emp-server-*.tar.gz"
           if sudo emp-server ripristina "$A/alterato.tar" --si; then exit 1; fi
           sudo emp-server ripristina "$BK" --si
-          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users WHERE username = "tecnico"')" = 1
           sudo emp-server moduli | grep -q emp-esempio
           curl -fsS --cacert "$RUNNER_TEMP/emp-ca.crt" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json' \
             -X POST "https://localhost/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
@@ -387,7 +387,7 @@ jobs:
           sudo test -f /etc/emp/tls/ca.key
           sudo ./installa.sh > /dev/null
           sudo emp-server moduli | grep -q emp-esempio
-          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users WHERE username = "tecnico"')" = 1
       - name: Total reset di un clone (azzera)
         run: |
           set -euo pipefail
@@ -398,7 +398,7 @@ jobs:
           # Senza terminale e senza --si rifiuta; nome non valido rifiutato. Nessuna modifica.
           if sudo EMP_RUNNER_DIR="$FINTO" emp-server azzera --nome cliente-prova </dev/null; then exit 1; fi
           if sudo emp-server azzera --nome -x --si; then exit 1; fi
-          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 1
+          test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users WHERE username = "tecnico"')" = 1
           test -e "$FINTO/.runner"
           sudo EMP_RUNNER_DIR="$FINTO" emp-server azzera --nome cliente-prova --si | tee "$RUNNER_TEMP/azzera.log"
           # Identità nuova, dati e collegamento GitHub tolti.

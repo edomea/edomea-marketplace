@@ -1,0 +1,9 @@
+[Unit]
+Description=EMP Server — operazioni pianificate del WordPress del negozio, ogni 5 minuti
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

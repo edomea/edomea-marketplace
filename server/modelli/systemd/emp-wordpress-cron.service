@@ -1,0 +1,12 @@
+[Unit]
+Description=EMP Server — operazioni pianificate del WordPress del negozio (WooCommerce, aggiornamenti)
+After=mariadb.service
+
+[Service]
+Type=oneshot
+User=wordpress
+Group=wordpress
+UMask=0022
+Environment=HOME=/var/lib/emp/wordpress/tmp WP_CLI_CACHE_DIR=/var/lib/emp/wordpress/tmp/wp-cli-cache
+ExecStart=/usr/bin/php -d memory_limit=512M /opt/emp/wp-cli/wp-cli.phar --path=/var/lib/emp/wordpress/sito/negozio cron event run --due-now --quiet
+Nice=10

@@ -22,6 +22,7 @@
 #   EMP_NOME_DNS=emp.negozio.lan   nome aggiuntivo nel certificato (DNS del negozio)
 #   EMP_SENZA_FIREWALL=1           non configura ufw (firewall gestito altrove)
 #   EMP_CONSENTI_SISTEMA=1         consente versioni di Ubuntu non collaudate
+#   EMP_SENZA_WORDPRESS=1          non installa il WordPress del negozio (scelta ricordata)
 set -euo pipefail
 
 SOURCE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -80,7 +81,7 @@ install_packages() {
     apt-get update -q
     apt-get install -y -q --no-install-recommends \
         nginx mariadb-server mariadb-client \
-        php-fpm php-cli php-mysql php-mbstring php-zip php-curl \
+        php-fpm php-cli php-mysql php-mbstring php-zip php-curl php-gd php-xml php-intl php-bcmath \
         openssl ca-certificates curl ufw unattended-upgrades lsb-release rclone
     # In una macchina virtuale VMware: strumenti per lo spegnimento ordinato insieme al PC che la ospita.
     if [[ $(systemd-detect-virt 2>/dev/null || true) == vmware ]]; then
@@ -243,11 +244,33 @@ install_core() {
 
 # ---------------------------------------------------------------- 7. servizi
 
+# ---------------------------------------------------------------- 6b. WordPress del negozio
+
+wordpress_enabled() {
+    wp_installed && return 0
+    [[ ${EMP_SENZA_WORDPRESS:-} == 1 ]] && touch "$EMP_CONF_DIR/senza-wordpress"
+    [[ ! -f $EMP_CONF_DIR/senza-wordpress ]]
+}
+
+install_wordpress() {
+    wordpress_enabled || { info "WordPress del negozio non installato (scelta: $EMP_CONF_DIR/senza-wordpress)"; return 0; }
+    step "WordPress del negozio (https://IP/negozio/) con WooCommerce"
+    wp_setup
+    install -d -m 0750 -o "$WP_USER" -g adm /var/log/emp-wordpress
+}
+
 configure_services() {
     step "PHP-FPM, Nginx, firewall e operazioni pianificate"
     local subst=(-e "s#@EMP_DATA@#${EMP_DATA}#g" -e "s#@EMP_MODULES@#${EMP_MODULES}#g" -e "s#@EMP_TLS@#${EMP_TLS}#g" -e "s#@EMP_CONFIG@#${EMP_CONFIG}#g" -e "s#@EMP_BOOT_CONF@#${EMP_CONF_DIR}/avvio.conf#g")
 
     sed "${subst[@]}" "$SOURCE_DIR/modelli/php-fpm-emp.conf" > "/etc/php/${PHP_VERSION}/fpm/pool.d/emp.conf"
+    local with_wp=0
+    wp_installed && with_wp=1
+    if ((with_wp)); then
+        sed "${subst[@]}" "$SOURCE_DIR/modelli/php-fpm-wordpress.conf" > "/etc/php/${PHP_VERSION}/fpm/pool.d/emp-wordpress.conf"
+    else
+        rm -f "/etc/php/${PHP_VERSION}/fpm/pool.d/emp-wordpress.conf"
+    fi
     # Il gruppo predefinito "www" di Ubuntu non serve: disattivato per ridurre la superficie.
     if [[ -f /etc/php/${PHP_VERSION}/fpm/pool.d/www.conf ]]; then
         mv "/etc/php/${PHP_VERSION}/fpm/pool.d/www.conf" "/etc/php/${PHP_VERSION}/fpm/pool.d/www.conf.disattivato"
@@ -258,6 +281,7 @@ configure_services() {
 
     # Senza IPv6 nel sistema (es. disattivato nella VM) Nginx ascolta solo in IPv4.
     [[ -e /proc/net/if_inet6 ]] || subst+=(-e '/listen \[::\]/d')
+    ((with_wp)) || subst+=(-e '/# WORDPRESS-INIZIO/,/# WORDPRESS-FINE/d')
     sed "${subst[@]}" "$SOURCE_DIR/modelli/nginx-emp.conf" > /etc/nginx/sites-available/emp
     ln -sfn /etc/nginx/sites-available/emp /etc/nginx/sites-enabled/emp
     rm -f /etc/nginx/sites-enabled/default
@@ -279,6 +303,11 @@ configure_services() {
         "$SOURCE_DIR"/modelli/systemd/emp-*.path /etc/systemd/system/
     systemctl daemon-reload
     systemctl enable -q --now emp-certificato.timer emp-backup-web.path
+    if ((with_wp)); then
+        systemctl enable -q --now emp-wordpress-cron.timer
+    else
+        systemctl disable -q --now emp-wordpress-cron.timer 2>/dev/null || true
+    fi
     systemctl reset-failed emp-backup-web.path emp-backup-web.service 2>/dev/null || true
     systemctl restart emp-backup-web.path
     # Orario, attivazione e conservazione dei backup: impostazioni della macchina (pagina Backup di /techadmin).
@@ -378,6 +407,12 @@ summary() {
         echo
         echo "    Se scade o si perde: sudo emp-server codice-setup"
     fi
+    if wp_installed; then
+        echo
+        echo " Negozio (WordPress + WooCommerce):"
+        for ip in $(private_ipv4); do echo "      https://${ip}/negozio/   (amministrazione: /negozio/wp-admin/)"; done
+        echo "    Utente e password dell'amministratore: sudo emp-server wordpress accesso"
+    fi
     echo
     echo " Gestione: sudo emp-server stato | backup | ripristina | backup-remoto | accesso-scp | certificato | collega-github"
     echo
@@ -395,6 +430,7 @@ main() {
     write_core_config
     cmd_certificato --se-necessario
     install_core
+    install_wordpress
     configure_services
     wait_health
     summary

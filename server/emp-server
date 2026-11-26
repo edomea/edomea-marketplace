@@ -23,6 +23,7 @@
 #   sudo emp-server avvio-sicuro [--fine]          avvia solo il Core (tutti i plugin fermi); --fine per tornare al normale
 #   sudo emp-server azzera --nome NOME             total reset di un clone del master (dati, identità, nome)
 #   sudo emp-server collega-github                 collega questo Server a GitHub (token da GitHub)
+#   sudo emp-server wordpress [stato|accesso|password]  WordPress del negozio (https://IP/negozio/)
 #
 # Installato da installa.sh in /opt/emp/server, collegato in /usr/local/sbin/emp-server.
 set -euo pipefail
@@ -187,6 +188,11 @@ cmd_certificato() {
         return 0
     fi
     create_server_cert
+    # WordPress del negozio: indirizzi e autorità aggiornati insieme al certificato.
+    if wp_installed; then
+        wp_write_addresses
+        wp_trust_ca
+    fi
     # Certificato dell'autorità scaricabile dalle postazioni (http://SERVER/emp-ca.crt).
     install -m 0644 -o root -g root "$EMP_TLS/ca.crt" "$EMP_DATA/pubblico/emp-ca.crt"
     if systemctl is-active --quiet nginx; then
@@ -489,7 +495,8 @@ readonly EMP_PACKAGE_DIR=$EMP_DATA/pacchetto
 readonly REMOTE_DIR=$EMP_CONF_DIR/backup-remoto
 readonly REMOTE_CONF=$REMOTE_DIR/rclone.conf
 # dati-moduli: file dei plugin (es. foto dei prodotti di EMP Studio), dalla 0.6.0-alpha.22.
-readonly EMP_DATA_DIRS="moduli catalogo catalogo-locale dati-moduli"
+# wordpress: WordPress del negozio (file e plugin; il database è a parte in wordpress.sql.gz), dalla 0.6.0-alpha.24.
+readonly EMP_DATA_DIRS="moduli catalogo catalogo-locale dati-moduli wordpress"
 
 # Cartelle temporanee rimosse all'uscita (niente trap RETURN: in Bash sono globali e si
 # sovrappongono quando una funzione ne chiama un'altra, es. il backup dentro il ripristino).
@@ -765,11 +772,18 @@ cmd_backup() {
     mariadb-dump --single-transaction --routines --events --triggers --hex-blob \
         --default-character-set=utf8mb4 emp | gzip -6 > "$work/database.sql.gz"
     gzip -t "$work/database.sql.gz" || die "esportazione del database non riuscita"
+    local extra=()
+    if wp_database_exists && wp_installed; then
+        mariadb-dump --single-transaction --routines --events --triggers --hex-blob \
+            --default-character-set=utf8mb4 "$WP_DB" | gzip -6 > "$work/wordpress.sql.gz"
+        gzip -t "$work/wordpress.sql.gz" || die "esportazione del database di WordPress non riuscita"
+        extra+=(wordpress.sql.gz)
+    fi
     # Solo le cartelle che ci sono (es. dati-moduli prima del primo avvio della 0.6.0-alpha.22).
     local present=() d
     # shellcheck disable=SC2086  # elenco fisso di cartelle
     for d in $EMP_DATA_DIRS; do [[ -d $EMP_DATA/$d ]] && present+=("$d"); done
-    tar -C "$EMP_DATA" -czf "$work/dati.tar.gz" "${present[@]}"
+    tar -C "$EMP_DATA" --exclude=wordpress/tmp -czf "$work/dati.tar.gz" "${present[@]}"
     local package="emp-server-${server}.tar.gz"
     if [[ -f $EMP_PACKAGE_DIR/$package ]]; then
         cp "$EMP_PACKAGE_DIR/$package" "$work/$package"
@@ -787,9 +801,9 @@ cmd_backup() {
         echo "etichetta=$label"
         echo "pacchetto=$package"
     } > "$work/MANIFEST"
-    ( cd "$work" && sha256sum MANIFEST database.sql.gz dati.tar.gz ${package:+"$package"} > SHA256SUMS )
+    ( cd "$work" && sha256sum MANIFEST database.sql.gz "${extra[@]}" dati.tar.gz ${package:+"$package"} > SHA256SUMS )
     file="$EMP_BACKUP/$name.tar"
-    tar -C "$work" -cf "$work/backup.tar" MANIFEST SHA256SUMS database.sql.gz dati.tar.gz ${package:+"$package"}
+    tar -C "$work" -cf "$work/backup.tar" MANIFEST SHA256SUMS database.sql.gz "${extra[@]}" dati.tar.gz ${package:+"$package"}
     if ! encrypt_backup_file "$work/backup.tar" "$file.parziale" "$(backup_key)"; then
         rm -f -- "${file:?}.parziale"
         die "cifratura del backup non riuscita"
@@ -1142,6 +1156,13 @@ cmd_ripristina() {
         file="$work/backup.tar"
     fi
     tar -C "$work" -xf "$file" MANIFEST SHA256SUMS database.sql.gz dati.tar.gz 2>/dev/null || die "file di backup non valido"
+    # WordPress del negozio (backup dalla 0.6.0-alpha.24): database a parte.
+    local members has_wp=0
+    members=$(tar -tf "$file")
+    if grep -qx wordpress.sql.gz <<<"$members"; then
+        tar -C "$work" -xf "$file" wordpress.sql.gz || die "file di backup non valido"
+        has_wp=1
+    fi
     local package
     package=$(manifest_field "$work" pacchetto)
     if [[ -n $package ]]; then
@@ -1151,7 +1172,7 @@ cmd_ripristina() {
     ( cd "$work" && sha256sum --quiet --strict -c SHA256SUMS ) || die "backup danneggiato o modificato (SHA256SUMS)"
     [[ $(manifest_field "$work" formato) == "$BACKUP_FORMAT" ]] || die "formato del backup non supportato"
     # Elenco letto per intero: con "| grep -q" e pipefail il SIGPIPE renderebbe falso il controllo.
-    if tar -tzf "$work/dati.tar.gz" | grep -Ev '^(moduli|catalogo|catalogo-locale|dati-moduli)(/|$)' | grep . >/dev/null; then
+    if tar -tzf "$work/dati.tar.gz" | grep -Ev '^(moduli|catalogo|catalogo-locale|dati-moduli|wordpress)(/|$)' | grep . >/dev/null; then
         die "il backup contiene percorsi non ammessi"
     fi
 
@@ -1166,6 +1187,7 @@ cmd_ripristina() {
     echo "Questa macchina: $(host_name), EMP Server ${current:-non installato}"
     echo
     echo "Database, Core, plugin e cataloghi di EMP verranno SOSTITUITI da quelli del backup."
+    ((has_wp)) && echo "Anche il WordPress del negozio (database, file e plugin) verrà sostituito."
     echo "Restano di questa macchina: nome, certificato HTTPS, collegamento a GitHub e ai backup remoti."
     if [[ -z $package && $bserver != "$current" ]]; then
         die "il backup non contiene il pacchetto di EMP Server ${bserver:-?}: installare prima quella versione"
@@ -1194,12 +1216,29 @@ FLUSH PRIVILEGES;
 SQL
     gunzip -c "$work/database.sql.gz" | mariadb emp || die "importazione del database non riuscita"
     info "Database ripristinato"
+    if ((has_wp)); then
+        # Utente "wordpress" prima dei file: tar ne rimette i proprietari per nome.
+        wp_create_layout
+        mariadb -e "DROP DATABASE IF EXISTS ${WP_DB}"
+        wp_database
+        gunzip -c "$work/wordpress.sql.gz" | mariadb "$WP_DB" || die "importazione del database di WordPress non riuscita"
+        info "Database di WordPress ripristinato"
+    fi
 
     local d
+    # Un backup senza WordPress (versioni precedenti) non cancella il WordPress di questa macchina.
     # shellcheck disable=SC2086  # elenco fisso di cartelle
-    for d in $EMP_DATA_DIRS; do rm -rf "${EMP_DATA:?}/$d"; done
+    for d in $EMP_DATA_DIRS; do
+        [[ $d == wordpress ]] && ((!has_wp)) && continue
+        rm -rf "${EMP_DATA:?}/$d"
+    done
     tar -C "$EMP_DATA" -xzf "$work/dati.tar.gz" --same-owner
     create_dirs
+    if ((has_wp)); then
+        wp_create_layout
+        wp_write_addresses
+        wp_trust_ca
+    fi
     info "Core, plugin e cataloghi ripristinati"
 
     if [[ -n $package && $bserver != "$current" ]]; then
@@ -1486,6 +1525,10 @@ EOF
     cmd_certificato
     echo "==> Core sul database vuoto"
     core_cli installa --utente=installer | sed 's/^/  /'
+    if wp_installed; then
+        echo "==> WordPress del negozio vuoto (nuovo amministratore)"
+        wp_reset
+    fi
     fpm="php$(php_version)-fpm"
     systemctl start "$fpm" nginx
     systemctl start emp-backup.timer emp-certificato.timer
@@ -1525,6 +1568,232 @@ EOF
     echo
 }
 
+# ---------------------------------------------------------------- WordPress del negozio
+# WordPress (con WooCommerce) sullo stesso Server, in https://IP/negozio/: casse, magazzino e
+# negozi con i plugin Edomea. Gira come utente di sistema "wordpress" (gruppo PHP-FPM e database
+# propri, separati da EMP), è nei backup cifrati e si aggiorna da solo (aggiornamenti minori).
+#   /var/lib/emp/wordpress/sito/negozio/  file di WordPress (radice web: .../sito)
+#   /var/lib/emp/wordpress/tmp/           file temporanei e cache di WP-CLI (fuori dal web)
+#   /etc/emp/wordpress-accesso            utente e password dell'amministratore (solo root)
+readonly WP_USER=wordpress
+readonly WP_DB=wordpress
+readonly WP_BASE=/var/lib/emp/wordpress
+readonly WP_ROOT=/var/lib/emp/wordpress/sito/negozio
+readonly WP_PATH=/negozio
+readonly WP_CLI=/opt/emp/wp-cli/wp-cli.phar
+readonly WP_ACCESS=/etc/emp/wordpress-accesso
+readonly WP_CLI_URL=https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+
+wp_installed() { [[ -f $WP_ROOT/wp-config.php ]]; }
+
+# WP-CLI come utente wordpress; umask 022: Nginx deve poter leggere i file statici (CSS, foto).
+wp_cli() {
+    # shellcheck disable=SC2016  # variabili espanse dalla shell interna
+    runuser -u "$WP_USER" -- env -i PATH=/usr/bin:/bin HOME="$WP_BASE/tmp" WP_CLI_CACHE_DIR="$WP_BASE/tmp/wp-cli-cache" \
+        bash -c 'umask 022; exec php -d memory_limit=512M "$0" --path="$1" "${@:2}"' "$WP_CLI" "$WP_ROOT" "$@"
+}
+
+wp_create_layout() {
+    if ! id -u "$WP_USER" >/dev/null 2>&1; then
+        useradd --system --home-dir "$WP_BASE" --no-create-home --shell /usr/sbin/nologin "$WP_USER"
+    fi
+    install -d -m 0755 -o root -g root "$WP_BASE" "$WP_BASE/sito"
+    install -d -m 0755 -o "$WP_USER" -g "$WP_USER" "$WP_ROOT"
+    install -d -m 0700 -o "$WP_USER" -g "$WP_USER" "$WP_BASE/tmp"
+}
+
+wp_database() {
+    mariadb <<SQL
+CREATE DATABASE IF NOT EXISTS ${WP_DB} CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '${WP_USER}'@'localhost' IDENTIFIED VIA unix_socket;
+GRANT ALL PRIVILEGES ON ${WP_DB}.* TO '${WP_USER}'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+}
+
+wp_database_exists() { [[ -n $(mariadb -N -e "SHOW DATABASES LIKE '${WP_DB}'" 2>/dev/null) ]]; }
+
+# WP-CLI (strumento ufficiale di WordPress), con controllo dell'impronta SHA-512.
+wp_get_cli() {
+    [[ -f $WP_CLI ]] && return 0
+    local tmp
+    tmp=$(mktemp -d)
+    if ! curl -fsSL --max-time 300 -o "$tmp/wp-cli.phar" "$WP_CLI_URL" \
+        || ! curl -fsSL --max-time 60 -o "$tmp/wp-cli.phar.sha512" "$WP_CLI_URL.sha512"; then
+        rm -f "$tmp/wp-cli.phar" "$tmp/wp-cli.phar.sha512"; rmdir "$tmp"
+        die "WP-CLI non scaricabile (serve Internet)"
+    fi
+    if [[ $(sha512sum "$tmp/wp-cli.phar" | cut -d' ' -f1) != "$(awk 'NR == 1 {print $1}' "$tmp/wp-cli.phar.sha512")" ]]; then
+        rm -f "$tmp/wp-cli.phar" "$tmp/wp-cli.phar.sha512"; rmdir "$tmp"
+        die "WP-CLI scaricato non integro (SHA-512)"
+    fi
+    install -d -m 0755 -o root -g root /opt/emp/wp-cli
+    install -m 0644 -o root -g root "$tmp/wp-cli.phar" "$WP_CLI"
+    rm -f "$tmp/wp-cli.phar" "$tmp/wp-cli.phar.sha512"; rmdir "$tmp"
+}
+
+# Indirizzi da cui si apre il negozio (quelli del certificato), riscritti a ogni installazione e a
+# ogni rinnovo del certificato. WordPress usa l'indirizzo con cui lo si apre se è uno di questi o
+# un IP della rete locale; altrimenti il primo.
+wp_write_addresses() {
+    wp_installed || return 0
+    local hosts=() ip name dns list='' h tmp
+    for ip in $(private_ipv4); do hosts+=("$ip"); done
+    name=$(host_name)
+    hosts+=("$name" "$name.local")
+    dns=$(extra_dns)
+    [[ -n $dns ]] && hosts+=("$dns")
+    for h in "${hosts[@]}"; do list+="'$h', "; done
+    tmp=$(mktemp)
+    cat > "$tmp" <<EOF
+<?php
+// EMP Server — indirizzi del negozio. Generato da emp-server: le modifiche manuali vengono sovrascritte.
+\$emp_hosts = [${list%, }];
+\$emp_host = strtolower((string) (\$_SERVER['HTTP_HOST'] ?? ''));
+if (!in_array(\$emp_host, \$emp_hosts, true) && !preg_match('/^(10\\.|192\\.168\\.|172\\.(1[6-9]|2[0-9]|3[01])\\.)[0-9.]+\$/', \$emp_host)) {
+    \$emp_host = \$emp_hosts[0];
+}
+define('WP_HOME', 'https://' . \$emp_host . '${WP_PATH}');
+define('WP_SITEURL', 'https://' . \$emp_host . '${WP_PATH}');
+unset(\$emp_hosts, \$emp_host);
+EOF
+    install -m 0644 -o root -g root "$tmp" "$WP_BASE/emp-indirizzi.php"
+    rm -f "$tmp"
+}
+
+# Autorità locale fra quelle di sistema: WordPress può chiamare sé stesso in HTTPS (salute del sito,
+# WooCommerce). È limitata alle reti private e ai nomi del Server (name constraints).
+wp_trust_ca() {
+    [[ -f $EMP_TLS/ca.crt ]] || return 0
+    if ! cmp -s "$EMP_TLS/ca.crt" /usr/local/share/ca-certificates/emp-ca-locale.crt; then
+        install -m 0644 "$EMP_TLS/ca.crt" /usr/local/share/ca-certificates/emp-ca-locale.crt
+        update-ca-certificates >/dev/null 2>&1 || true
+    fi
+}
+
+wp_new_password() { openssl rand -base64 32 | tr -d '/+=\n' | cut -c1-24; }
+
+wp_save_access() { # $1 utente, $2 password
+    local tmp
+    tmp=$(mktemp)
+    printf 'utente=%s\npassword=%s\n' "$1" "$2" > "$tmp"
+    install -m 0600 -o root -g root "$tmp" "$WP_ACCESS"
+    rm -f "$tmp"
+}
+
+# Prima configurazione: italiano, fuso orario, date gg/mm/aaaa, indirizzi leggibili, WooCommerce in euro.
+wp_first_setup() {
+    local url host user=amministratore pass opt
+    host=$(first_private_ipv4 || true)
+    url="https://${host:-$(host_name).local}${WP_PATH}"
+    pass=$(wp_new_password)
+    wp_cli core install --url="$url" --title="Negozio" --admin_user="$user" --admin_password="$pass" \
+        --admin_email="$user@$(host_name).local" --skip-email >/dev/null || die "installazione di WordPress non riuscita"
+    wp_save_access "$user" "$pass"
+    wp_cli language core install it_IT --activate >/dev/null 2>&1 || true
+    for opt in 'timezone_string Europe/Rome' 'date_format d/m/Y' 'time_format H:i' 'start_of_week 1' \
+        'blog_public 0' 'users_can_register 0'; do
+        # shellcheck disable=SC2086  # nome e valore
+        wp_cli option update $opt >/dev/null
+    done
+    wp_cli rewrite structure '/%postname%/' >/dev/null
+    if [[ ${EMP_SENZA_WOOCOMMERCE:-} != 1 ]]; then
+        if [[ -d $WP_ROOT/wp-content/plugins/woocommerce ]]; then
+            wp_cli plugin activate woocommerce >/dev/null || die "WooCommerce non attivato"
+        else
+            wp_cli plugin install woocommerce --activate >/dev/null || die "WooCommerce non installato (serve Internet)"
+        fi
+        wp_cli language plugin install woocommerce it_IT >/dev/null 2>&1 || true
+        for opt in 'woocommerce_default_country IT' 'woocommerce_currency EUR' 'woocommerce_price_decimal_sep ,' \
+            'woocommerce_price_thousand_sep .' 'woocommerce_prices_include_tax yes' 'woocommerce_weight_unit kg' \
+            'woocommerce_dimension_unit cm'; do
+            # shellcheck disable=SC2086  # nome e valore
+            wp_cli option update $opt >/dev/null
+        done
+    fi
+}
+
+# Installazione o verifica (rieseguibile): WordPress e WooCommerce si scaricano solo la prima volta.
+wp_setup() {
+    wp_create_layout
+    wp_database
+    wp_get_cli
+    if [[ ! -f $WP_ROOT/wp-includes/version.php ]]; then
+        info "Download di WordPress in italiano (wordpress.org, con controllo delle impronte)"
+        wp_cli core download --locale=it_IT >/dev/null || die "WordPress non scaricabile (serve Internet)"
+    fi
+    if ! wp_installed; then
+        wp_cli config create --dbname="$WP_DB" --dbuser="$WP_USER" --dbpass= --dbhost="localhost:/run/mysqld/mysqld.sock" \
+            --dbcharset=utf8mb4 --locale=it_IT --skip-check --extra-php >/dev/null <<EOF || die "configurazione di WordPress non riuscita"
+// EMP Server: indirizzi del negozio (rigenerati da emp-server) e impostazioni del Server.
+require '${WP_BASE}/emp-indirizzi.php';
+define('FS_METHOD', 'direct');
+define('FS_CHMOD_DIR', 0755);
+define('FS_CHMOD_FILE', 0644);
+define('DISALLOW_FILE_EDIT', true);
+define('DISABLE_WP_CRON', true);
+define('WP_AUTO_UPDATE_CORE', 'minor');
+define('WP_MEMORY_LIMIT', '256M');
+define('WP_DEBUG', false);
+EOF
+        chmod 0640 "$WP_ROOT/wp-config.php"
+    fi
+    wp_write_addresses
+    wp_trust_ca
+    if ! wp_cli core is-installed >/dev/null 2>&1; then
+        wp_first_setup
+        info "WordPress e WooCommerce installati: utente e password con  sudo emp-server wordpress accesso"
+    else
+        info "WordPress $(wp_version) già installato"
+    fi
+}
+
+# Total reset di un clone: database e foto di prova via; file di WordPress e plugin restano (niente Internet).
+wp_reset() {
+    wp_installed || return 0
+    mariadb -e "DROP DATABASE IF EXISTS ${WP_DB}"
+    rm -rf /var/lib/emp/wordpress/sito/negozio/wp-content/uploads /var/lib/emp/wordpress/tmp /etc/emp/wordpress-accesso
+    wp_create_layout
+    wp_database
+    wp_write_addresses
+    wp_first_setup
+    info "WordPress azzerato: nuovo amministratore (sudo emp-server wordpress accesso)"
+}
+
+wp_version() { wp_installed && sed -n "s/^\$wp_version = '\(.*\)';/\1/p" "$WP_ROOT/wp-includes/version.php"; }
+
+cmd_wordpress() {
+    require_root wordpress
+    local sub=${1:-stato}
+    shift || true
+    case $sub in
+        stato)
+            if ! wp_installed; then echo "WordPress non installato (sudo emp-server wordpress installa)"; return 0; fi
+            echo "WordPress $(wp_version) — https://$(first_private_ipv4)${WP_PATH}/  (amministrazione: ${WP_PATH}/wp-admin/)"
+            echo "  operazioni pianificate: $(systemctl is-active emp-wordpress-cron.timer 2>/dev/null || true)"
+            wp_cli plugin list --fields=name,status,version --format=table 2>/dev/null | sed 's/^/  /' || true
+            ;;
+        accesso)
+            [[ -f $WP_ACCESS ]] || die "credenziali non presenti: sudo emp-server wordpress password"
+            echo "Indirizzo: https://$(first_private_ipv4)${WP_PATH}/wp-admin/"
+            sed 's/^utente=/Utente:    /; s/^password=/Password:  /' "$WP_ACCESS"
+            echo "(dopo il primo accesso conviene cambiarla da WordPress → Profilo)"
+            ;;
+        password)
+            wp_installed || die "WordPress non installato"
+            local user pass
+            user=$(sed -n 's/^utente=//p' "$WP_ACCESS" 2>/dev/null || true)
+            user=${user:-amministratore}
+            pass=$(wp_new_password)
+            wp_cli user update "$user" --user_pass="$pass" --skip-email >/dev/null || die "utente $user non trovato in WordPress"
+            wp_save_access "$user" "$pass"
+            info "Nuova password di $user: sudo emp-server wordpress accesso"
+            ;;
+        installa) wp_setup; systemctl enable -q --now emp-wordpress-cron.timer ;;
+        *) die "uso: sudo emp-server wordpress stato|accesso|password|installa" ;;
+    esac
+}
+
 # ---------------------------------------------------------------- collegamento a GitHub
 
 cmd_collega_github() {
@@ -1536,7 +1805,7 @@ cmd_collega_github() {
 }
 
 usage() {
-    sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
 }
 
 main() {
@@ -1565,6 +1834,7 @@ main() {
         avvio-sicuro) cmd_avvio_sicuro "$@" ;;
         azzera) cmd_azzera "$@" ;;
         collega-github) cmd_collega_github "$@" ;;
+        wordpress) cmd_wordpress "$@" ;;
         -h | --help | aiuto | '') usage ;;
         *) usage >&2; exit 2 ;;
     esac

@@ -89,22 +89,22 @@ Per copiarlo sulla VM ci sono due modi.
 
 **Dal PC Windows** (PowerShell, nella cartella dove si trova il file). `scp` è già incluso in Windows 11:
 ```
-scp emp-server-0.6.0-alpha.23.tar.gz utente@IP-DEL-SERVER:
+scp emp-server-0.6.0-alpha.24.tar.gz utente@IP-DEL-SERVER:
 ```
 
 **Direttamente sulla VM**, se ha accesso a Internet:
 ```
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.23/emp-server-0.6.0-alpha.23.tar.gz
-wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.23/emp-server-0.6.0-alpha.23.tar.gz.sha256
-sha256sum -c emp-server-0.6.0-alpha.23.tar.gz.sha256
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.24/emp-server-0.6.0-alpha.24.tar.gz
+wget https://github.com/edomea/edomea-marketplace/releases/download/v0.6.0-alpha.24/emp-server-0.6.0-alpha.24.tar.gz.sha256
+sha256sum -c emp-server-0.6.0-alpha.24.tar.gz.sha256
 ```
 
 ### 2.2 Eseguire l'installazione
 
 Sulla VM, dalla console o via SSH (`ssh utente@IP-DEL-SERVER`):
 ```
-tar -xzf emp-server-0.6.0-alpha.23.tar.gz
-cd emp-server-0.6.0-alpha.23
+tar -xzf emp-server-0.6.0-alpha.24.tar.gz
+cd emp-server-0.6.0-alpha.24
 sudo ./installa.sh
 ```
 
@@ -190,7 +190,9 @@ Dopo il setup, il Tecnico crea gli amministratori e installa i plugin dalla pagi
 | `/var/lib/emp/arrivi/plugin/` | ZIP dei plugin caricati via scp | emp, gruppo emp-file |
 | `/etc/emp/backup-remoto/` | destinazione remota e chiave dei backup (della macchina) | root |
 | `/var/lib/emp/precedenti/` | ultime 5 versioni del Core sostituite | root |
-| `/var/log/emp/`, `/var/log/nginx/emp-*.log` | registri | |
+| `/var/lib/emp/wordpress/sito/negozio/` | WordPress del negozio con WooCommerce (dalla 0.6.0-alpha.24) | `wordpress` |
+| `/etc/emp/wordpress-accesso` | utente e password dell'amministratore di WordPress | root (solo lettura di root) |
+| `/var/log/emp/`, `/var/log/nginx/emp-*.log`, `/var/log/emp-wordpress/` | registri | |
 
 ### Servizi e protezioni
 
@@ -204,6 +206,23 @@ Dopo il setup, il Tecnico crea gli amministratori e installa i plugin dalla pagi
 | **Aggiornamenti** | Aggiornamenti di sicurezza di Ubuntu automatici, senza riavvii automatici. |
 | **Operazioni pianificate** | `emp-backup.timer` ogni notte (02:30, modificabile dalla pagina Backup); `emp-certificato.timer` ogni giorno, per scadenza o cambio di indirizzo IP. |
 | **Pagina Backup** | Il Core non esegue comandi: deposita una richiesta in `/var/lib/emp/backup-web/richieste/`. `emp-backup-web.path` avvia `emp-backup-web` (root), che accetta solo le operazioni previste, con valori controllati, e le esegue con `emp-server`. Le chiavi non finiscono mai nei file leggibili dal Core né nel registro; i download li consegna Nginx da una cartella interna, dopo il controllo del Core. |
+
+### WordPress del negozio
+
+Dalla 0.6.0-alpha.24 l'installazione mette sullo stesso Server un **WordPress con WooCommerce** in italiano, in `https://IP-DEL-SERVER/negozio/` (amministrazione: `/negozio/wp-admin/`). Serve a usare subito i plugin Edomea già funzionanti (cassa, magazzino, scontrino…): si caricano da WordPress → Plugin → Aggiungi nuovo → Carica plugin. Il WordPress locale è il **master** di prodotti, prezzi e giacenze; il sito online riceverà i dati da lui.
+
+- **Separato da EMP:** utente di sistema `wordpress`, gruppo PHP-FPM proprio (`open_basedir` limitato alla sua cartella), database `wordpress` con accesso `unix_socket` senza password. WordPress non legge i file né il database di EMP.
+- **Nei backup cifrati:** database (`wordpress.sql.gz`) e file (temi, plugin, foto) entrano nello stesso backup di EMP e tornano con il ripristino. Un backup di una versione precedente, senza WordPress, non tocca il WordPress della macchina.
+- **Aggiornamenti:** WordPress applica da solo gli aggiornamenti minori; temi e plugin si aggiornano da WordPress. Le operazioni pianificate (WooCommerce, aggiornamenti) le esegue `emp-wordpress-cron.timer` ogni 5 minuti, anche senza visite.
+- **Indirizzi:** WordPress si apre dagli stessi indirizzi del certificato (IP, nome del Server, `nome.local`) e da ogni IP della rete locale; si aggiornano insieme al certificato.
+- **Total reset di un clone (`azzera`):** database e foto di prova cancellati, file e plugin restano; nuovo amministratore.
+- **Senza WordPress:** `sudo EMP_SENZA_WORDPRESS=1 ./installa.sh` (scelta ricordata in `/etc/emp/senza-wordpress`).
+
+```
+sudo emp-server wordpress           stato, versione e plugin
+sudo emp-server wordpress accesso   utente e password dell'amministratore
+sudo emp-server wordpress password  nuova password dell'amministratore
+```
 
 Il Core accetta le funzioni sensibili (primo setup, recupero del Tecnico, plugin, backup) **solo in HTTPS**, oppure da richieste fatte sul Server stesso.
 

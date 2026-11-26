@@ -64,7 +64,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - name: Pulizia dell'immagine del runner
@@ -133,6 +133,22 @@ jobs:
           BODY_CODE=$(printf '{"codice":"%s","username":"tecnico","nome":"Tecnico CI","password":"Chiave-Sicura-CI-2026"}' "$SETUP_CODE")
           test "$(code "${J[@]}" -X POST "$B/api/v1/accesso/setup" -d "$BODY")" = 401
           curl -fsS "${J[@]}" -X POST "$B/api/v1/accesso/setup" -d "$BODY_CODE" | grep -q '"recovery_key":"EMP-'
+          # WordPress del negozio con WooCommerce in /negozio/, utente e PHP-FPM propri.
+          test "$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' --cacert "$CA" "$B/negozio")" = "301 $B/negozio/"
+          curl -fsS --cacert "$CA" "$B/negozio/" | grep '/negozio/wp-' >/dev/null
+          curl -fsS --cacert "$CA" -o /dev/null "$B/negozio/wp-login.php"
+          curl -fsS --cacert "$CA" "$B/negozio/wp-json/wc/store/v1/products" | jq -e 'type == "array"' >/dev/null
+          test "$(code --cacert "$CA" "$B/negozio/wp-config.php")" = 403
+          test "$(code --cacert "$CA" "$B/negozio/xmlrpc.php")" = 403
+          sudo emp-server wordpress accesso | grep -E '^Password: +[A-Za-z0-9]{20,}$' >/dev/null
+          sudo emp-server wordpress stato | tee /dev/stderr | grep woocommerce >/dev/null
+          test "$(sudo stat -c %U /var/lib/emp/wordpress/sito/negozio/wp-config.php)" = wordpress
+          systemctl is-active emp-wordpress-cron.timer
+          sudo systemctl start emp-wordpress-cron.service
+          # WordPress non legge i dati di EMP; il database di EMP non è accessibile all'utente wordpress.
+          if sudo -u wordpress cat /etc/emp/config.php 2>/dev/null; then exit 1; fi
+          if sudo -u wordpress mariadb emp -e 'SELECT 1' 2>/dev/null; then exit 1; fi
+          sudo -u wordpress mariadb wordpress -e 'SELECT 1' >/dev/null
           test "$(code "${J[@]}" -X POST "$B/api/v1/accesso/setup" -d "$BODY_CODE")" = 409
           # Accesso e pagina Plugin: installazione dal web del plugin dimostrativo.
           curl -fsS -c "$RUNNER_TEMP/jar" "${J[@]}" -X POST "$B/api/v1/accesso/login" -d '{"username":"tecnico","password":"Chiave-Sicura-CI-2026"}' | grep -q '"ruolo":"tecnico"'
@@ -384,9 +400,11 @@ jobs:
         run: |
           set -euo pipefail
           BK=$(sudo sh -c 'ls -t /var/lib/emp/backup/emp-backup-*.tar' | head -1)
-          # Guasto simulato: utenti cancellati e plugin rimosso.
+          # Guasto simulato: utenti cancellati, plugin rimosso, WordPress danneggiato.
           sudo mariadb emp -e 'DELETE FROM emp_core_sessions; DELETE FROM emp_core_users'
           sudo rm -rf /var/lib/emp/moduli/emp-esempio
+          sudo mariadb wordpress -e 'DROP TABLE wp_posts'
+          sudo rm -f /var/lib/emp/wordpress/sito/negozio/wp-content/plugins/woocommerce/woocommerce.php
           # Senza conferma (nessun terminale, niente --si) non tocca nulla; file alterato rifiutato.
           if sudo emp-server ripristina "$BK" </dev/null; then exit 1; fi
           test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users')" = 0
@@ -400,6 +418,9 @@ jobs:
           if sudo emp-server ripristina "$A/alterato.tar" --si; then exit 1; fi
           sudo emp-server ripristina "$BK" --si
           test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users WHERE username = "tecnico"')" = 1
+          sudo mariadb wordpress -e 'SELECT COUNT(*) FROM wp_posts' >/dev/null
+          sudo test -f /var/lib/emp/wordpress/sito/negozio/wp-content/plugins/woocommerce/woocommerce.php
+          curl -fsS --cacert "$RUNNER_TEMP/emp-ca.crt" "https://localhost/negozio/wp-json/wc/store/v1/products" | jq -e 'type == "array"' >/dev/null
           sudo emp-server moduli | grep -q emp-esempio
           curl -fsS --cacert "$RUNNER_TEMP/emp-ca.crt" -H 'X-EMP-Richiesta: 1' -H 'Content-Type: application/json' \
             -X POST "https://localhost/api/v1/accesso/login" -d '{"username":"tecnico","password":"Recupero-Console-CI-2026"}' | grep -q '"ruolo":"tecnico"'
@@ -414,6 +435,7 @@ jobs:
           sudo test -f /etc/emp/tls/ca.key
           sudo ./installa.sh > /dev/null
           sudo emp-server moduli | grep -q emp-esempio
+          curl -fsS --cacert "$RUNNER_TEMP/emp-ca.crt" -o /dev/null "https://localhost/negozio/wp-login.php"
           test "$(sudo mariadb -N -e 'SELECT COUNT(*) FROM emp.emp_core_users WHERE username = "tecnico"')" = 1
       - name: Total reset di un clone (azzera)
         run: |
@@ -422,6 +444,7 @@ jobs:
           mkdir -p "$FINTO" && touch "$FINTO/.runner"
           OLD_FP=$(sudo openssl x509 -in /etc/emp/tls/ca.crt -noout -fingerprint -sha256)
           OLD_ID=$(cat /etc/machine-id)
+          OLD_WP=$(sudo sed -n 's/^password=//p' /etc/emp/wordpress-accesso)
           # Senza terminale e senza --si rifiuta; nome non valido rifiutato. Nessuna modifica.
           if sudo EMP_RUNNER_DIR="$FINTO" emp-server azzera --nome cliente-prova </dev/null; then exit 1; fi
           if sudo emp-server azzera --nome -x --si; then exit 1; fi
@@ -448,6 +471,9 @@ jobs:
           SETUP_CODE=$(grep -oE 'EMP-[A-Z2-9]{5}-[A-Z2-9]{5}-[A-Z2-9]{5}' "$RUNNER_TEMP/azzera.log" | tail -1)
           curl -fsS "${L[@]}" -X POST https://cliente-prova/api/v1/accesso/setup \
             -d "$(printf '{"codice":"%s","username":"tecnico2","nome":"Tecnico cliente","password":"Chiave-Cliente-CI-2026"}' "$SETUP_CODE")" | grep -q '"recovery_key":"EMP-'
+          # WordPress vuoto, con un amministratore nuovo; WooCommerce di nuovo attivo.
+          test "$(sudo sed -n 's/^password=//p' /etc/emp/wordpress-accesso)" != "$OLD_WP"
+          curl -fsS "${L[@]}" https://cliente-prova/negozio/wp-json/wc/store/v1/products | jq -e 'type == "array"' >/dev/null
           sudo emp-server stato
       - name: Ripristino su una macchina nuova dal backup remoto cifrato
         run: |

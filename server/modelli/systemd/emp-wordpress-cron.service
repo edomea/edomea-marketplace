@@ -7,6 +7,7 @@ Type=oneshot
 User=wordpress
 Group=wordpress
 UMask=0022
+WorkingDirectory=/var/lib/emp/wordpress/tmp
 Environment=HOME=/var/lib/emp/wordpress/tmp WP_CLI_CACHE_DIR=/var/lib/emp/wordpress/tmp/wp-cli-cache
 ExecStart=/usr/bin/php -d memory_limit=512M /opt/emp/wp-cli/wp-cli.phar --path=/var/lib/emp/wordpress/sito/negozio cron event run --due-now --quiet
 Nice=10

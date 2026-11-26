@@ -84,6 +84,7 @@ jobs:
           # Come capita installando Ubuntu: l'amministratore della VM si chiama "emp".
           sudo useradd -m -s /bin/bash -G sudo emp
           cd "$RUNNER_TEMP"/inst/emp-server-*
+          set -o pipefail
           sudo ./installa.sh | tee "$RUNNER_TEMP/installa-1.log"
           grep -q "è un account personale" "$RUNNER_TEMP/installa-1.log"
       - name: Vecchio account personale "emp" eliminato, EMP con utente di sistema

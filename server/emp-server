@@ -1587,10 +1587,11 @@ readonly WP_CLI_URL=https://raw.githubusercontent.com/wp-cli/builds/gh-pages/pha
 wp_installed() { [[ -f $WP_ROOT/wp-config.php ]]; }
 
 # WP-CLI come utente wordpress; umask 022: Nginx deve poter leggere i file statici (CSS, foto).
+# Cartella di lavoro propria: WP-CLI avvia sotto-processi, che non partono da una cartella non sua.
 wp_cli() {
     # shellcheck disable=SC2016  # variabili espanse dalla shell interna
     runuser -u "$WP_USER" -- env -i PATH=/usr/bin:/bin HOME="$WP_BASE/tmp" WP_CLI_CACHE_DIR="$WP_BASE/tmp/wp-cli-cache" \
-        bash -c 'umask 022; exec php -d memory_limit=512M "$0" --path="$1" "${@:2}"' "$WP_CLI" "$WP_ROOT" "$@"
+        bash -c 'umask 022; cd "$HOME" || exit 1; exec php -d memory_limit=512M "$0" --path="$1" "${@:2}"' "$WP_CLI" "$WP_ROOT" "$@"
 }
 
 wp_create_layout() {
